@@ -14,36 +14,53 @@ Never write real API keys, passwords, tokens, connection strings, or private cre
 
 Sentinel AI may use credentials for:
 
-- Claude / Anthropic
-- NewsAPI
-- MongoDB Atlas
-- Neo4j Aura
+- Groq API (External LLM Provider - Free API key)
+- NewsAPI (Structured public news evidence)
+- MongoDB Atlas (Case object & report persistent storage)
+- Neo4j / Neo4j Aura (Financial network graph database)
 
 The prototype does not require real banking, KYC, device-registry, beneficiary, or geolocation credentials.
 
-Those services are mocked.
+Those services are intentionally mocked.
 
 ---
 
-# 3. Anthropic / Claude
+# 3. Groq API (LLM Provider)
 
 ## Purpose
 
-Used by Agent 5 for structured investigation-report generation.
+Used by Agent 5 (Explanation Generator) for structured investigation-report generation.
 
 ## Secret
 
-Anthropic API key.
+`GROQ_API_KEY` (Free Tier API Key).
+
+## Model
+
+Configurable via environment setting (e.g. `GROQ_MODEL`). Do not hardcode model choices.
 
 ## Configuration
 
-The application must obtain the credential through the project's secure environment/secrets mechanism.
+The application must obtain the credential through the project's secure environment configuration (`.env`).
 
 Never hard-code the key in source code.
 
 Never commit it to Git.
 
 Never place it inside Markdown documentation.
+
+---
+
+# 3.1 Service Role Architecture Distinction
+
+Sentinel AI clearly distinguishes the following components:
+
+- **Groq API**: External LLM Provider for explanation & report generation.
+- **Mock Banking APIs**: Core Banking, KYC, Device Registry, Beneficiary Database, Geolocation, Transaction Alert Source (Simulated internal services; no external credentials required).
+- **MongoDB Atlas**: Case object & investigation output persistent storage.
+- **Neo4j**: Financial account/transaction graph & network analysis.
+- **NewsAPI**: Structured public-news evidence.
+- **Regulatory / Sanctions Sources**: Approved offline source data (FATF, RBI, OFAC, UN).
 
 ---
 

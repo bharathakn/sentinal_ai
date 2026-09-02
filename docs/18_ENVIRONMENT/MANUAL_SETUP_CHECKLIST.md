@@ -23,23 +23,22 @@ AI coding agents may guide the developer but must not assume that these tasks ha
 
 # 3. Datasets
 
-- [x] IEEE-CIS dataset downloaded
-- [x] PaySim dataset downloaded
-- [ ] Dataset raw directories organized
-- [ ] Dataset integrity verified
-- [ ] Dataset provenance documented
-- [ ] Custom Synthetic India Dataset generated later
+- [x] IEEE-CIS dataset available (`dataset/raw/ieee_cis/`)
+- [x] PaySim dataset available (`dataset/raw/paysim/`)
+- [x] Regulatory source material available (`dataset/raw/regulatory/fatf/` and `dataset/raw/regulatory/rbi/`)
+- [x] Sanctions data available (`dataset/raw/sanctions/ofac/` and `dataset/raw/sanctions/un/`)
+- [x] Dataset raw directories organized
+- [ ] Custom Synthetic India Dataset (STATUS: TO BE GENERATED - generated programmatically later)
 
 ---
 
-# 4. Anthropic / Claude
+# 4. Groq API (LLM Provider)
 
-- [ ] Anthropic account available
-- [ ] API access enabled
-- [ ] API key created
-- [ ] API key stored securely
+- [ ] Groq account / Free API key obtained
+- [ ] API key stored securely in `.env`
 - [ ] API key NOT committed to Git
-- [ ] Claude API connectivity tested
+- [ ] Groq API model configured (e.g. `GROQ_MODEL`)
+- [ ] Groq API connectivity tested
 
 ---
 
@@ -47,7 +46,7 @@ AI coding agents may guide the developer but must not assume that these tasks ha
 
 - [ ] NewsAPI account created
 - [ ] API key obtained
-- [ ] API key stored securely
+- [ ] API key stored securely in `.env`
 - [ ] API key NOT committed to Git
 - [ ] NewsAPI connectivity tested
 
@@ -61,25 +60,25 @@ AI coding agents may guide the developer but must not assume that these tasks ha
 - [ ] Database user created
 - [ ] Network access configured
 - [ ] Connection string obtained
-- [ ] Connection string stored securely
+- [ ] Connection string stored securely in `.env`
 - [ ] Database connectivity tested
 
 ---
 
-# 7. Neo4j Aura
+# 7. Neo4j / Neo4j Aura
 
 - [ ] Neo4j account created
 - [ ] Free development database created
 - [ ] Database credentials obtained
 - [ ] Connection URI obtained
-- [ ] Credentials stored securely
+- [ ] Credentials stored securely in `.env`
 - [ ] Database connectivity tested
 
 ---
 
 # 8. Mock Services
 
-No external account is required for the following:
+No external account is required for the following (simulated internal banking services):
 
 - [ ] Mock Core Banking
 - [ ] Mock KYC
@@ -94,19 +93,15 @@ These will be implemented by the AI coding agent.
 
 # 9. Sanctions Data
 
-- [ ] OFAC source identified
-- [ ] OFAC data availability verified
-- [ ] UN consolidated sanctions source identified
-- [ ] UN data availability verified
+- [x] OFAC source data available (`dataset/raw/sanctions/ofac/ofac_sdn.csv`)
+- [x] UN consolidated sanctions data available (`dataset/raw/sanctions/un/un_consolidated_sanctions.xml`)
 
 ---
 
 # 10. Regulatory Sources
 
-- [ ] Official RBI sources identified
-- [ ] Relevant RBI AML material verified
-- [ ] FIU-IND material verified where applicable
-- [ ] FATF source material identified
+- [x] Official RBI source material available (`dataset/raw/regulatory/rbi/`)
+- [x] FATF source material available (`dataset/raw/regulatory/fatf/`)
 - [ ] Regulatory mappings approved before implementation
 
 ---

@@ -1,1 +1,64 @@
+# Sentinel AI — Git Ignore Configuration
+
+# 1. Environment Configuration & Secrets
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+credentials.json
+secrets/
+
+# 2. Datasets & Data Storage
+# Excludes large raw datasets (IEEE-CIS, PaySim), processed datasets, and raw regulatory/sanctions downloads.
+# Decision: Regulatory/sanctions source files under dataset/raw/ are safely ignored to avoid potential redistribution/licensing restrictions.
 dataset/
+dataset/raw/
+dataset/processed/
+*.csv
+*.parquet
+*.sqlite
+*.db
+
+# 3. Machine Learning Models & Heavy Artifacts
+models/
+*.joblib
+*.pkl
+*.onnx
+*.h5
+*.pt
+*.pth
+*.bst
+*.bin
+
+# 4. Python Environment & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# 5. Node.js & Frontend Build Artifacts
+node_modules/
+dist/
+build/
+.next/
+.out/
+
+# 6. Operating System & Editor Metadata
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo

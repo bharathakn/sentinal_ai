@@ -12,13 +12,14 @@ These rules apply to every AI coding agent.
 
 Raw datasets are immutable.
 
-Expected structure:
-
-dataset/raw/
+Directory roles:
+- `dataset/raw/`: original/read-only source data
+- `dataset/processed/`: derived/processed datasets
+- synthetic/generated data: generated separately and clearly identified as synthetic
 
 Raw data must never be edited directly.
 
-Agents must create processed or derived datasets separately.
+Agents must create processed or derived datasets separately under `dataset/processed/`.
 
 ---
 

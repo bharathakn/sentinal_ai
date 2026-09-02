@@ -42,7 +42,16 @@ MongoDB Atlas.
 
 LLM:
 
-Claude API.
+Groq API (Free Tier key, model configurable).
+
+## Service Roles & Architecture Distinction
+
+- **Groq API**: External LLM Provider (used for structured explanation and investigation report generation)
+- **Mock Banking APIs**: Core Banking, KYC, Device Registry, Beneficiary Database, Geolocation, Transaction Alert Source (Simulated internal services)
+- **MongoDB Atlas**: Case object & investigation output persistent storage
+- **Neo4j**: Financial account/transaction graph & network analysis
+- **NewsAPI**: External structured public-news evidence
+- **Regulatory / Sanctions Sources**: Approved offline source data (FATF, RBI, OFAC, UN)
 
 ## Environment Configuration
 

@@ -13,7 +13,7 @@ Application code must not depend on credentials being hard-coded.
 The project may require configuration for:
 
 - Application environment
-- Anthropic / Claude
+- Groq API (LLM Provider)
 - NewsAPI
 - MongoDB
 - Neo4j
@@ -30,12 +30,12 @@ Secrets must be provided through secure environment configuration.
 
 Potential secret categories include:
 
-- Anthropic API credential
-- NewsAPI credential
-- MongoDB authentication
-- Neo4j authentication
+- `GROQ_API_KEY` (Groq API credential)
+- `NEWS_API_KEY` (NewsAPI credential)
+- MongoDB authentication (`MONGODB_URI`)
+- Neo4j authentication (`NEO4J_URI`, `NEO4J_PASSWORD`)
 
-Actual values must never be stored in this document.
+Actual values must never be stored in this document or committed to Git.
 
 ---
 

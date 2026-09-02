@@ -58,7 +58,7 @@ Alert
 * Tailwind CSS
 * Recharts
 * React Force Graph
-* Claude API
+* Groq API (Free tier)
 
 ## Main Agents
 
@@ -78,16 +78,17 @@ A deterministic validation layer must check the generated report before it reach
 
 ## Prototype Data Sources
 
-* IEEE-CIS Fraud Detection Dataset
-* PaySim
-* Custom Synthetic India Dataset
+* IEEE-CIS Fraud Detection Dataset (Available in `dataset/raw/ieee_cis/`)
+* PaySim Synthetic Financial Dataset (Available in `dataset/raw/paysim/`)
+* FATF & RBI Regulatory Material (Available in `dataset/raw/regulatory/`)
+* OFAC & UN Sanctions Data (Available in `dataset/raw/sanctions/`)
+* Custom Synthetic India Dataset (STATUS: TO BE GENERATED)
 * Mock KYC API
 * Mock Core Banking API
-* Device Registry
-* Beneficiary Database
-* Sanctions sources
-* Structured News API
-* Geolocation data
+* Mock Device Registry
+* Mock Beneficiary Database
+* Mock Geolocation Data
+* Structured News API (NewsAPI)
 
 ## Current Status
 

@@ -22,124 +22,122 @@ Agents must not silently introduce a new dataset without documenting it here.
 
 # 2. Dataset Overview
 
-Sentinel AI currently uses three main dataset categories:
+Sentinel AI dataset and reference material verification status:
 
-1. IEEE-CIS Fraud Detection Dataset
-2. PaySim Synthetic Financial Dataset
-3. Custom Synthetic India Dataset
+1. IEEE-CIS Fraud Detection Dataset: **AVAILABLE AND VERIFIED**
+2. PaySim Synthetic Financial Dataset: **AVAILABLE AND VERIFIED**
+3. Regulatory Material (FATF & RBI): **AVAILABLE AND VERIFIED**
+4. Sanctions Data (OFAC & UN): **AVAILABLE AND VERIFIED**
+5. Custom Synthetic India Dataset: **PLANNED / TO BE GENERATED**
 
-The first two datasets are already available locally.
+## Read-Only Data Architecture Rules
 
-The Custom Synthetic India Dataset will be generated as part of the project.
+- `dataset/raw/`: Original read-only source data (immutable). Never edit or overwrite raw files directly.
+- `dataset/processed/`: Intended location for derived, cleaned, or transformed dataset outputs.
+- `synthetic data`: Programmatically generated data, clearly marked as synthetic, stored separately from raw data.
 
 ---
 
 # 3. IEEE-CIS Fraud Detection Dataset
 
+## Verification Status
+
+**AVAILABLE AND VERIFIED**
+
 ## Purpose
 
-Primary machine-learning dataset for the anomaly detection system.
+Primary machine-learning dataset for anomaly detection, feature engineering, and model training (XGBoost, Isolation Forest, SHAP).
 
-The dataset is used primarily for:
+## Verified Local Location
 
-- Feature engineering
-- XGBoost training
-- Isolation Forest experimentation
-- Model evaluation
-- Fraud classification experiments
-- SHAP-based model explanation
-- Agent 1 development and testing
+`dataset/raw/ieee_cis/`
 
-## Local Location
+## Verified Files & Inspection Metrics
 
-The raw dataset must be stored under:
+- `train_transaction.csv` (652 MB, **590,540 rows**, Contains `TransactionID`, `isFraud` target label, `TransactionDT`, `TransactionAmt`)
+- `train_identity.csv` (26 MB, **144,233 rows**, Contains `TransactionID`, `id_01`..`id_38`, `DeviceType`, `DeviceInfo`)
+- `test_transaction.csv` (585 MB, **506,691 rows**, Contains `TransactionID`)
+- `test_identity.csv` (25 MB, **141,907 rows**, Contains `TransactionID`)
+- `sample_submission.csv` (5.8 MB, **506,691 rows**, Contains `TransactionID`, `isFraud`)
 
-`dataset/raw/ieee-cis/`
+## Verified Relationship & Schema
 
-## Expected Files
-
-The directory should contain:
-
-- `train_transaction.csv`
-- `train_identity.csv`
-- `test_transaction.csv`
-- `test_identity.csv`
-- `sample_submission.csv`
-
-## Important Relationship
-
-`train_transaction.csv` and `train_identity.csv` are related through the transaction identifier.
-
-The same principle applies to the test transaction and identity datasets.
-
-Agents must inspect the actual schema before implementing preprocessing.
-
-Do not assume that every field is present or populated.
+`TransactionID` is the joining key connecting transaction logs (`train_transaction.csv`) with device/identity features (`train_identity.csv`).
 
 ## Raw Data Rule
 
-The original IEEE-CIS files must never be modified.
-
-All preprocessing must create a separate processed representation.
+Raw IEEE-CIS files are read-only. Preprocessing must write derived datasets under `dataset/processed/`.
 
 ---
 
 # 4. PaySim Synthetic Financial Dataset
 
+## Verification Status
+
+**AVAILABLE AND VERIFIED**
+
 ## Purpose
 
-PaySim is the secondary financial dataset.
+Secondary financial transaction network dataset for graph analysis in Neo4j and multi-account pattern detection.
 
-It is intended to provide:
-
-- Additional fraud-pattern coverage
-- Transaction-network data
-- Graph analysis input
-- Agent 3 testing
-- Synthetic financial behavior examples
-- Additional end-to-end testing scenarios
-
-## Local Location
-
-The raw dataset must be stored under:
+## Verified Local Location
 
 `dataset/raw/paysim/`
 
-## Expected File
+## Verified File & Inspection Metrics
 
-The current downloaded dataset contains:
-
-`PS_20174392719_1491204439457_log.csv`
+- `PS_20174392719_1491204439457_log.csv` (471 MB, **6,362,620 rows**)
+- **Schema**: `step`, `type`, `amount`, `nameOrig`, `oldbalanceOrg`, `newbalanceOrig`, `nameDest`, `oldbalanceDest`, `newbalanceDest`, `isFraud`, `isFlaggedFraud`.
 
 ## Important Rule
 
-Do not automatically load the entire PaySim dataset into Neo4j.
-
-The dataset is large and the Neo4j environment is intended for prototype-scale graph analysis.
-
-Agents must first determine an appropriate subset, transformation, or representative network extraction strategy.
+Do not load all 6.36M rows directly into Neo4j; extract representative fraud network subgraphs for prototype execution.
 
 ---
 
-# 5. Custom Synthetic India Dataset
+# 5. Regulatory Sources (FATF & RBI)
 
-## Status
+## Verification Status
 
-Not yet generated.
+**AVAILABLE AND VERIFIED**
+
+## Verified Files & Locations
+
+- **FATF**: `dataset/raw/regulatory/fatf/fatf-recommendations-2026.pdf` (1.5 MB)
+- **RBI**: `dataset/raw/regulatory/rbi/Master Directions on Fraud Risk Management in Commercial Banks .pdf` (1.8 MB)
 
 ## Purpose
 
-The Custom Synthetic India Dataset is intended to make the Sentinel AI demonstration relevant to Indian financial transaction scenarios.
+Grounding regulatory mappings and compliance references for Agent 4 (Risk Assessor) and Agent 5 (Explanation Generator).
 
-It should represent scenarios such as:
+---
 
-- UPI transactions
-- NEFT transactions
-- RTGS transactions
-- Indian account behavior
-- Indian transaction timing
-- Indian-style customer profiles
-- Indian fraud patterns
+# 6. Sanctions Data (OFAC & UN)
+
+## Verification Status
+
+**AVAILABLE AND VERIFIED**
+
+## Verified Files & Locations
+
+- **OFAC**: `dataset/raw/sanctions/ofac/ofac_sdn.csv` (5.5 MB)
+- **UN**: `dataset/raw/sanctions/un/un_consolidated_sanctions.xml` (2.1 MB)
+
+## Purpose
+
+Watchlist screening and entity risk matching for Agent 2 (Evidence Gatherer) and Agent 4 (Risk Assessor).
+
+---
+
+# 7. Custom Synthetic India Dataset
+
+## Verification Status
+
+**PLANNED / TO BE GENERATED** (Does not exist yet)
+
+## Purpose
+
+Will be programmatically generated later during development to demonstrate UPI, NEFT, RTGS, and Indian banking scenarios (~10,000 synthetic transactions). It will be explicitly tagged as synthetic.
 - Suspicious beneficiary behavior
 - Layering
 - Structuring
@@ -152,7 +150,7 @@ Approximately 10,000 transactions for the initial prototype.
 
 ## Generation
 
-The dataset should be generated programmatically by the project implementation.
+The dataset will be generated programmatically by the project implementation later and saved with synthetic markers.
 
 The generation process must be deterministic when a fixed random seed is used.
 
@@ -164,7 +162,7 @@ It must never be presented as real Indian banking data.
 
 ---
 
-# 6. Canonical Sentinel Transaction Model
+# 8. Canonical Sentinel Transaction Model
 
 The three datasets have different schemas.
 

@@ -19,24 +19,24 @@ Establish the project architecture, documentation system, development environmen
 - Project concept defined
 - Five-agent architecture defined
 - Investigation flow defined
-- Technology stack selected
-- Prototype datasets identified
+- Technology stack selected (Groq API, MongoDB Atlas, Neo4j, FastAPI, React, Mock Banking APIs)
+- Prototype datasets identified & raw dataset directories organized (`dataset/raw/ieee_cis`, `dataset/raw/paysim`, `dataset/raw/regulatory/`, `dataset/raw/sanctions/`)
+- Repository structure and documentation audit initialized
 - Evidence sources identified
 - Dashboard requirements identified
 - Validation architecture defined
 
 ## In Progress
 
-Project foundation.
+Project foundation & setup.
 
 ## Next Major Milestones
 
-1. Repository initialization
-2. Development environment setup
-3. Dataset preparation
-4. ML pipeline
-5. Neo4j graph setup
-6. FastAPI ingestion
+1. Development environment & secrets configuration (`.env`)
+2. Custom Synthetic India Dataset generation (STATUS: TO BE GENERATED)
+3. ML pipeline (Agent 1)
+4. Neo4j graph setup (Agent 3)
+5. FastAPI ingestion
 7. Agent 1
 8. Agent 2
 9. Agent 3
