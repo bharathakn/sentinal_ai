@@ -193,3 +193,14 @@ The agent must verify:
 - Identifier relationships
 
 before implementing the pipeline.
+
+---
+
+# 12. Synthetic Data Governance & Reproducibility Rules
+
+Synthetic datasets generated for Sentinel AI (such as `dataset/processed/custom_india/`) must adhere to strict governance:
+
+- **Explicit Labeling:** Must be explicitly documented and tagged as **SYNTHETIC DATA** in all manifests and documentation. It must never be described as real banking data.
+- **Raw Data Immutability:** Source datasets in `dataset/raw/` (IEEE-CIS, PaySim, FATF/RBI regulatory documents, OFAC/UN sanctions lists) are strictly read-only and immutable.
+- **Programmatic Reproducibility:** All synthetic generation must be fully programmatic via seed-configured scripts (`src/data/synthetic_india_generator.py` with seed `42`).
+- **No Manual CSV Editing:** Manual editing or modification of generated CSV files is strictly forbidden. Any schema updates, distribution tweaks, or dataset expansions must be implemented in the generator code and re-executed to preserve end-to-end reproducibility.

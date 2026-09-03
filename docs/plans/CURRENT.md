@@ -25,17 +25,17 @@ Establish the project architecture, documentation system, development environmen
 - Evidence sources identified
 - Dashboard requirements identified
 - Validation architecture defined
+- Custom Synthetic India Dataset generated and validated (STATUS: COMPLETED & VERIFIED — SYNTHETIC DATA)
 
 ## In Progress
 
-Project foundation & setup.
+Custom Synthetic India Dataset branch finalization.
 
 ## Next Major Milestones
 
 1. Development environment & secrets configuration (`.env`)
-2. Custom Synthetic India Dataset generation (STATUS: TO BE GENERATED)
-3. ML pipeline (Agent 1)
-4. Neo4j graph setup (Agent 3)
+2. ML pipeline baseline model development (Agent 1)
+3. Neo4j graph database setup & bulk ingestion (Agent 3)
 5. FastAPI ingestion
 7. Agent 1
 8. Agent 2
