@@ -62,3 +62,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+src/__pycache__/
+src/data/__pycache__/
