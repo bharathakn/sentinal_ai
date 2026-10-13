@@ -215,21 +215,25 @@ The dataset is explicitly designed for **multiple system purposes**:
 
 # 8. Canonical Sentinel Transaction Model
 
-The three datasets have different schemas.
+The three datasets have entirely different schemas.
 
-Sentinel AI must therefore define an internal canonical transaction representation.
+Sentinel AI defines an internal canonical transaction representation (`CanonicalTransaction`) that every dataset is normalized into before entering the agent pipeline.
 
-Conceptually:
-
+```
 Dataset-specific schema
+  → Dataset Adapter (IEEE-CIS / PaySim / India Synthetic)
+  → CanonicalTransaction (Pydantic v2 validated)
+  → Agents (Agent 1 → Agent 2 → … → Output Validator)
+```
 
-→ preprocessing/normalization
+Agents work with `CanonicalTransaction` and must never directly depend on raw dataset-specific column names.
 
-→ Sentinel canonical transaction representation
+**Full specification:** `docs/16_DATA/CANONICAL_TRANSACTION_SCHEMA.md`
 
-→ agents
-
-The agents should primarily work with the canonical representation rather than directly depending on raw dataset-specific column names.
+**Implementation:**
+- Model: `src/schemas/canonical_transaction.py`
+- Adapters: `src/schemas/adapters/`
+- Tests: `tests/test_canonical_schema.py` (82 tests, all passing)
 
 ---
 

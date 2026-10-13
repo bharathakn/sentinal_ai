@@ -8,11 +8,11 @@ Sentinel AI
 
 ## Current Phase
 
-Project initialization.
+Foundation — Data normalization layer.
 
 ## Current Objective
 
-Establish the project architecture, documentation system, development environment and repository structure before feature implementation.
+Canonical Transaction Schema implemented and tested. Next: Development environment & secrets configuration, then ML pipeline baseline.
 
 ## Completed
 
@@ -26,10 +26,17 @@ Establish the project architecture, documentation system, development environmen
 - Dashboard requirements identified
 - Validation architecture defined
 - Custom Synthetic India Dataset generated and validated (STATUS: COMPLETED & VERIFIED — SYNTHETIC DATA)
+- **Canonical Transaction Schema implemented** (`src/schemas/canonical_transaction.py`)
+  - Pydantic v2 `CanonicalTransaction` model with validation rules
+  - IEEE-CIS adapter (`src/schemas/adapters/ieee_cis_adapter.py`)
+  - PaySim adapter (`src/schemas/adapters/paysim_adapter.py`)
+  - India Synthetic adapter (`src/schemas/adapters/india_adapter.py`)
+  - 82 tests passing (`tests/test_canonical_schema.py`)
+  - Full schema documentation (`docs/16_DATA/CANONICAL_TRANSACTION_SCHEMA.md`)
 
 ## In Progress
 
-Custom Synthetic India Dataset branch finalization.
+None.
 
 ## Next Major Milestones
 
