@@ -16,9 +16,12 @@ Status: **IMPLEMENTED AND VERIFIED** — see `XGBOOST_PIPELINE.md`.
 
 ### Isolation Forest
 
-Secondary unsupervised anomaly model.
+Secondary unsupervised anomaly detection model.
 
-Status: **PLANNED** — Phase 2 next step.
+Status: **IMPLEMENTED AND VERIFIED** — see `ISOLATION_FOREST_PIPELINE.md`.
+
+Outputs `anomaly_score` (higher = more anomalous). **Not a fraud probability.**
+Must NOT be combined with XGBoost `fraud_probability` without a tested fusion strategy.
 
 ### SHAP
 

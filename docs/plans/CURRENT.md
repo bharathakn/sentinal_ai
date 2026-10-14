@@ -8,11 +8,11 @@ Sentinel AI
 
 ## Current Phase
 
-Phase 2 — Data and ML (XGBoost pipeline complete).
+Phase 2 — Data and ML (XGBoost + Isolation Forest complete).
 
 ## Current Objective
 
-Isolation Forest implementation (Phase 2 secondary model).
+IF threshold calibration and Agent 1 integration (XGBoost + IF → LangGraph Agent 1).
 
 ## Completed
 
@@ -33,10 +33,16 @@ Isolation Forest implementation (Phase 2 secondary model).
   - Inference predictor loading saved artifacts (`src/ml/predictor.py`)
   - Metrics evaluator: precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix (`src/ml/evaluator.py`)
   - SHAP explainability: global importance + per-prediction attribution (`src/ml/explainer.py`)
-  - Training script: `scripts/train_pipeline.py`
-  - 61 unit tests — all passing (`tests/`)
-  - Actual evaluation run on 15% IEEE-CIS sample: PR-AUC=0.662, ROC-AUC=0.934
-  - Artifact reload consistency verified (max_diff=0.00e+00)
+  - Actual evaluation (15% IEEE-CIS sample): PR-AUC=0.662, ROC-AUC=0.934
+- **Isolation Forest anomaly detection — IMPLEMENTED AND VERIFIED (Phase 2)**
+  - Unsupervised trainer reusing shared preprocessing (`src/ml/if_trainer.py`)
+  - Inference predictor with score convention documented (`src/ml/if_predictor.py`)
+  - IF evaluator with caveat text (`src/ml/if_evaluator.py`)
+  - Training script: `scripts/train_isolation_forest.py`
+  - 109 total tests — all passing
+  - Actual evaluation (15% IEEE-CIS sample): ROC-AUC=0.804, PR-AUC=0.178 (~5× random)
+  - Threshold calibration needed before deployment
+  - Artifact reload verified: max_diff=0.00e+00
 
 ## In Progress
 
@@ -44,22 +50,21 @@ Nothing.
 
 ## Next Major Milestones
 
-1. Isolation Forest (Phase 2 secondary model — unsupervised cross-check)
-2. Full-dataset XGBoost training (remove SENTINEL_SAMPLE_FRAC)
-3. Classification threshold tuning on validation set
+1. IF threshold calibration on validation data
+2. Full-dataset XGBoost + IF training (remove SENTINEL_SAMPLE_FRAC)
+3. Agent 1 (Anomaly Detector — wire XGBoost + IF into LangGraph)
 4. Neo4j graph database setup & bulk ingestion (Agent 3)
 5. FastAPI ingestion
-6. Agent 1 (Anomaly Detector — wire XGBoost predictor)
-7. Agent 2
-8. Agent 3
-9. Agent 4
-10. Agent 5
-11. Output Validator
-12. LangGraph integration
-13. MongoDB persistence
-14. Dashboard
-15. Evaluation
-16. End-to-end testing
+6. Agent 2
+7. Agent 3
+8. Agent 4
+9. Agent 5
+10. Output Validator
+11. LangGraph integration
+12. MongoDB persistence
+13. Dashboard
+14. Evaluation
+15. End-to-end testing
 
 ## Current Blockers
 
