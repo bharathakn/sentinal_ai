@@ -12,9 +12,13 @@ Machine learning is primarily used by the Anomaly Detector.
 
 Primary supervised fraud/anomaly model.
 
+Status: **IMPLEMENTED AND VERIFIED** — see `XGBOOST_PIPELINE.md`.
+
 ### Isolation Forest
 
 Secondary unsupervised anomaly model.
+
+Status: **PLANNED** — Phase 2 next step.
 
 ### SHAP
 
