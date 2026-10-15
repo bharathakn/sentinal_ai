@@ -82,7 +82,7 @@ A deterministic validation layer must check the generated report before it reach
 * PaySim Synthetic Financial Dataset (Available in `dataset/raw/paysim/`)
 * FATF & RBI Regulatory Material (Available in `dataset/raw/regulatory/`)
 * OFAC & UN Sanctions Data (Available in `dataset/raw/sanctions/`)
-* Custom Synthetic India Dataset (STATUS: TO BE GENERATED)
+* Custom Synthetic India Dataset (STATUS: COMPLETED & VERIFIED — `dataset/processed/custom_india/`)
 * Mock KYC API
 * Mock Core Banking API
 * Mock Device Registry
@@ -92,11 +92,41 @@ A deterministic validation layer must check the generated report before it reach
 
 ## Current Status
 
-Project initialization.
+- **Phase 1 — Canonical Transaction Schema & Adapters**: COMPLETE & VERIFIED (Pydantic v2 schema, IEEE-CIS, PaySim, India Synthetic adapters, 82 tests passing).
+- **Phase 2 — ML Data Pipeline**: COMPLETE & VERIFIED (XGBoost supervised model & Isolation Forest unsupervised anomaly detector, preprocessing pipeline, 117 tests passing).
+- **Phase 3 — Model Evaluation & Explainability Foundation**: COMPLETE & VERIFIED (Threshold calibration, validation isolation, SHAP feature attribution, Agent 1 ML scoring layer, 66 tests passing).
+- **Test Suite**: **265 automated tests** passing across all layers (`.venv/bin/python -m pytest tests/`).
+- **Next Planned Phase**: Phase 4 — Agent 1 Anomaly Detector (LangGraph Node & State Integration).
+
+## Quickstart & Verification
+
+```bash
+# Set up virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run complete test suite (265 tests)
+pytest tests/ -v
+
+# Run threshold calibration
+python scripts/run_threshold_calibration.py
+
+# Train ML models (15% development sample)
+SENTINEL_SAMPLE_FRAC=0.15 python scripts/train_pipeline.py
+SENTINEL_SAMPLE_FRAC=0.15 python scripts/train_isolation_forest.py
+
+# Train ML models (Full IEEE-CIS dataset — requires >=16GB RAM)
+SENTINEL_SAMPLE_FRAC=full python scripts/train_pipeline.py
+SENTINEL_SAMPLE_FRAC=full python scripts/train_isolation_forest.py
+```
 
 ## Documentation
 
-Detailed project knowledge is maintained under `docs/`.
+Detailed project knowledge is maintained under `docs/`:
+- `docs/plans/CURRENT.md`: Current project phase, verified metrics, hardware requirements, and active blockers.
+- `docs/04_MACHINE_LEARNING/`: Model architectures, calibration reports, and evaluation results.
+- `docs/16_DATA/CANONICAL_TRANSACTION_SCHEMA.md`: Canonical transaction specification and adapter mappings.
 
 AI development instructions are maintained in:
 

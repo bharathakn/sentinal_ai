@@ -35,22 +35,23 @@ Purpose: Compliance rule mapping, watchlist filtering, and risk scoring groundin
 
 ## Custom Synthetic India Dataset
 
-Status: **PLANNED / TO BE GENERATED** (Does not exist yet)
+Status: **COMPLETED AND VERIFIED** (`dataset/processed/custom_india/`)
 
 Purpose:
 
 Demonstrate India-relevant transaction patterns.
 
-Planned characteristics include:
+Characteristics:
 
-- UPI
-- NEFT
-- RTGS
+- UPI, NEFT, RTGS payment channels
 - Indian transaction timing patterns
-- project-defined regulatory thresholds
-- synthetic fraud patterns
+- Project-defined regulatory thresholds (RTGS ≥ ₹2L, UPI ≤ ₹1L)
+- Synthetic fraud patterns
 
-Will be generated programmatically later.
+Generated programmatically by `src/data/synthetic_india_generator.py`.
+
+**This dataset is kept separate from IEEE-CIS performance calculations.**
+Do not mix synthetic India data into IEEE-CIS evaluation metrics.
 
 ## Dataset Rules
 

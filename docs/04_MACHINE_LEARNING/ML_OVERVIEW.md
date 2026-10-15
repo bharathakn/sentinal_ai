@@ -4,50 +4,86 @@
 
 ## Purpose
 
-Machine learning is primarily used by the Anomaly Detector.
+Machine learning is primarily used by the Anomaly Detector (Agent 1).
 
 ## Models
 
 ### XGBoost
 
-Primary supervised fraud/anomaly model.
+Primary supervised fraud detection model.
+
+Status: **IMPLEMENTED AND VERIFIED** — see `XGBOOST_PIPELINE.md`.
+
+Output key: `fraud_probability` ∈ [0, 1] — supervised probability estimate.
 
 ### Isolation Forest
 
-Secondary unsupervised anomaly model.
+Secondary unsupervised anomaly detection model.
+
+Status: **IMPLEMENTED AND VERIFIED** — see `ISOLATION_FOREST_PIPELINE.md`.
+
+Output key: `anomaly_score` ∈ ℝ (higher = more anomalous). **Not a fraud probability.**
+
+Must NOT be combined with XGBoost `fraud_probability` without a tested fusion strategy.
 
 ### SHAP
 
-Explainability layer for feature contribution.
+Explainability layer for XGBoost feature contribution. Implemented in `src/ml/explainer.py`.
 
-## Dataset
+SHAP values describe model behavior, not proof of fraud.
 
-Primary dataset:
+## Threshold Calibration
 
-IEEE-CIS Fraud Detection Dataset.
+Status: **IMPLEMENTED** — see `THRESHOLD_CALIBRATION.md`.
+
+Threshold calibration uses the VALIDATION split only. The test set is evaluated once after selection.
+
+## Agent 1 Integration
+
+Status: **ML LAYER COMPLETE — GRAPH WIRING SCHEDULED FOR PHASE 4**
+
+`src/ml/agent1_scorer.py` provides the ML inference entry point for Agent 1.
+`src/ml/feature_mapper.py` provides CanonicalTransaction → IEEE-CIS feature mapping.
+
+The CanonicalTransaction Pydantic schema and adapters (`src/schemas/`) are integrated and verified (Phase 1 prerequisite). The LangGraph node wiring, state graph compilation, and score fusion (`combined_confidence`) are explicitly scheduled for Phase 4 (next week).
+
+## Datasets and Full-Data Capability
+
+Primary dataset for training and evaluation:
+- **IEEE-CIS Fraud Detection Dataset** — `dataset/raw/ieee_cis/` (590,540 raw transactions, 144,233 identity rows).
+  - Software supports full-dataset training via `SENTINEL_SAMPLE_FRAC=full` or omitting the environment variable.
+  - Baseline reported metrics below were evaluated on a **15% stratified sample** (88,581 transactions) for rapid development.
+  - Full-dataset training requires $\ge 16\text{GB}$ available host RAM to avoid OOM conditions during pandas merge and preprocessing.
 
 Supplementary dataset:
-
-PaySim.
+- **PaySim** — `dataset/raw/paysim/` (Synthetic mobile-money transactions for graph and network testing).
 
 Additional dataset:
+- **Custom Synthetic India Dataset** — `dataset/processed/custom_india/` (for Indian scenario testing only).
 
-Custom Synthetic India Dataset.
+Do NOT combine IEEE-CIS and India Synthetic results or present one as the other.
 
-## Evaluation
+## Evaluated Metrics (Phase 3)
 
-The project plan identifies:
+All metrics below are from ACTUAL evaluation runs. They are NOT targets.
 
-- accuracy
-- precision
-- recall
-- F1 score
-- AUC-ROC
-- false-positive rate
-- false-negative rate
+Full definitions: see `EVALUATION_RESULTS.md`.
 
-## Important Principle
+| Metric | Description |
+|---|---|
+| Accuracy | Overall correct predictions / total |
+| Precision | TP / (TP + FP) |
+| Recall | TP / (TP + FN) |
+| F1-score | Harmonic mean of precision and recall |
+| ROC-AUC | Area under ROC curve (threshold-independent) |
+| PR-AUC | Area under Precision-Recall curve (primary for imbalance) |
+| False Positive Rate | FP / (FP + TN) |
+| False Negative Rate | FN / (FN + TP) |
 
-Reported performance metrics must be generated from actual evaluation runs.
+## Important Principles
 
-The project documentation must distinguish planned target values from measured experimental results.
+* Reported performance metrics must be from actual evaluation runs.
+* The project documentation must distinguish planned target values from measured results.
+* Threshold selection uses the validation split only. Test set is evaluated once.
+* XGBoost and IF outputs are kept separate. Neither is proof of fraud.
+* SHAP values are explanations of model behavior, not causal fraud evidence.
