@@ -69,6 +69,12 @@ def evaluate_anomaly_detector(
     cm = confusion_matrix(y_true, y_pred).tolist()
     report = classification_report(y_true, y_pred, target_names=["legitimate", "anomaly"], zero_division=0)
 
+    # Derive FPR and FNR from confusion matrix.
+    # cm = [[TN, FP], [FN, TP]]
+    tn, fp, fn, tp = cm[0][0], cm[0][1], cm[1][0], cm[1][1]
+    fpr = round(fp / (fp + tn) if (fp + tn) > 0 else 0.0, 6)
+    fnr = round(fn / (fn + tp) if (fn + tp) > 0 else 0.0, 6)
+
     results: dict[str, Any] = {
         "dataset": dataset_label,
         "model_type": "IsolationForest",
@@ -86,6 +92,8 @@ def evaluate_anomaly_detector(
         "f1_score": round(f1, 4),
         "roc_auc": round(roc_auc, 4),
         "pr_auc": round(pr_auc, 4),
+        "false_positive_rate": fpr,
+        "false_negative_rate": fnr,
         "confusion_matrix": cm,
         "confusion_matrix_labels": ["legitimate", "anomaly"],
         "caveat": (
@@ -102,6 +110,8 @@ def evaluate_anomaly_detector(
     logger.info("  F1          : %.4f", f1)
     logger.info("  ROC-AUC     : %.4f", roc_auc)
     logger.info("  PR-AUC      : %.4f", pr_auc)
+    logger.info("  FPR         : %.6f", fpr)
+    logger.info("  FNR         : %.6f", fnr)
     logger.info("  Confusion   : %s", cm)
     logger.info("\nClassification report:\n%s", report)
 
@@ -130,6 +140,8 @@ def print_if_evaluation_report(metrics: dict[str, Any]) -> None:
     print(f"  F1-score           : {metrics['f1_score']:.4f}")
     print(f"  ROC-AUC            : {metrics['roc_auc']:.4f}")
     print(f"  PR-AUC *           : {metrics['pr_auc']:.4f}")
+    print(f"  False Positive Rate: {metrics['false_positive_rate']:.6f}")
+    print(f"  False Negative Rate: {metrics['false_negative_rate']:.6f}")
     print()
     print(f"  * Threshold-independent metrics.")
     print()

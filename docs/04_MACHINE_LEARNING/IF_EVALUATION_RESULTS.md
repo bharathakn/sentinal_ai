@@ -55,6 +55,8 @@ of 0.0 is not operationally useful — see threshold discussion below.
 | F1-score | 0.0687 | Very low — threshold is not operational |
 | **ROC-AUC** | **0.8036** | **Primary metric — threshold-independent** |
 | **PR-AUC** | **0.1784** | **Primary metric — threshold-independent** |
+| False Positive Rate | 1.0000 | All legitimate transactions flagged at threshold=0.0 |
+| False Negative Rate | 0.0000 | All fraud caught (trivially, since all rows flagged) |
 
 Confusion matrix (threshold=0.0):
 

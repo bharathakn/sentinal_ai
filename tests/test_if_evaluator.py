@@ -38,6 +38,7 @@ class TestEvaluateAnomalyDetector:
             "precision", "recall", "f1_score", "roc_auc", "pr_auc",
             "confusion_matrix", "threshold", "threshold_note",
             "caveat", "n_flagged_as_anomaly",
+            "false_positive_rate", "false_negative_rate",
         }
         assert required.issubset(metrics.keys())
 
@@ -101,6 +102,59 @@ class TestEvaluateAnomalyDetector:
         assert metrics["n_flagged_as_anomaly"] == int(y_pred.sum())
 
 
+class TestFprFnr:
+    def test_fpr_in_valid_range(self, eval_fixture):
+        y, scores = eval_fixture
+        metrics = evaluate_anomaly_detector(y, scores)
+        assert 0.0 <= metrics["false_positive_rate"] <= 1.0
+
+    def test_fnr_in_valid_range(self, eval_fixture):
+        y, scores = eval_fixture
+        metrics = evaluate_anomaly_detector(y, scores)
+        assert 0.0 <= metrics["false_negative_rate"] <= 1.0
+
+    def test_fpr_computed_correctly_from_cm(self, eval_fixture):
+        """FPR = FP / (FP + TN) — verify against raw confusion matrix."""
+        y, scores = eval_fixture
+        metrics = evaluate_anomaly_detector(y, scores)
+        cm = metrics["confusion_matrix"]
+        tn, fp = cm[0][0], cm[0][1]
+        expected_fpr = round(fp / (fp + tn) if (fp + tn) > 0 else 0.0, 6)
+        assert metrics["false_positive_rate"] == expected_fpr
+
+    def test_fnr_computed_correctly_from_cm(self, eval_fixture):
+        """FNR = FN / (FN + TP) — verify against raw confusion matrix."""
+        y, scores = eval_fixture
+        metrics = evaluate_anomaly_detector(y, scores)
+        cm = metrics["confusion_matrix"]
+        fn, tp = cm[1][0], cm[1][1]
+        expected_fnr = round(fn / (fn + tp) if (fn + tp) > 0 else 0.0, 6)
+        assert metrics["false_negative_rate"] == expected_fnr
+
+    def test_fpr_zero_when_no_false_positives(self):
+        """All legitimate transactions correctly predicted → FPR = 0."""
+        # y_true: 0=legit 1=fraud  — no legit incorrectly flagged
+        y_true = np.array([0, 0, 0, 1, 1])
+        scores = np.array([-0.5, -0.5, -0.5, 0.5, 0.5])
+        metrics = evaluate_anomaly_detector(y_true, scores, threshold=0.0)
+        assert metrics["false_positive_rate"] == 0.0
+
+    def test_fnr_zero_when_all_fraud_caught(self):
+        """All frauds flagged → FNR = 0."""
+        y_true = np.array([0, 0, 1, 1])
+        scores = np.array([0.5, 0.5, 0.5, 0.5])  # everything flagged
+        metrics = evaluate_anomaly_detector(y_true, scores, threshold=0.0)
+        assert metrics["false_negative_rate"] == 0.0
+
+    def test_fpr_fnr_in_degenerate_all_zero_predictions(self):
+        """All-zero predictions: all fraud missed → FNR=1.0, FPR=0.0."""
+        y_true = np.array([0, 0, 0, 1, 1])
+        scores = np.array([-1.0, -1.0, -1.0, -1.0, -1.0])
+        metrics = evaluate_anomaly_detector(y_true, scores, threshold=0.0)
+        assert metrics["false_negative_rate"] == 1.0
+        assert metrics["false_positive_rate"] == 0.0
+
+
 class TestPrintIfReport:
     def test_print_does_not_raise(self, eval_fixture, capsys):
         y, scores = eval_fixture
@@ -109,3 +163,11 @@ class TestPrintIfReport:
         out = capsys.readouterr().out
         assert "Precision" in out
         assert "NOTE" in out
+
+    def test_print_contains_fpr_fnr(self, eval_fixture, capsys):
+        y, scores = eval_fixture
+        metrics = evaluate_anomaly_detector(y, scores)
+        print_if_evaluation_report(metrics)
+        out = capsys.readouterr().out
+        assert "False Positive Rate" in out
+        assert "False Negative Rate" in out
