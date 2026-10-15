@@ -98,12 +98,12 @@ The contamination parameter is deliberately NOT set to the fraud base rate.
 The model does not know what fraction of transactions are fraudulent;
 setting contamination to the fraud rate would leak class information.
 
-## Default Decision Threshold
+## Decision Thresholds
 
-Default: `0.0` (the model's natural decision boundary where
-`score_samples == 0`).
-
-Adjust on held-out data for operational sensitivity requirements.
+- **Trivial Baseline Threshold**: `0.0` (model's natural decision boundary where `score_samples == 0`). Flags all transactions (FPR=1.000, FNR=0.000, F1=0.0687).
+- **Calibrated Threshold**: `0.4679` (selected via F1-maximization on held-out validation/calibration split). FPR drops to `0.0346` (3.5% false alarms), F1=`0.2933`, Precision=`0.2618`, Recall=`0.3333`, Accuracy=`0.9315`.
+- Calibration script: `scripts/run_threshold_calibration.py`.
+- Full details: `THRESHOLD_CALIBRATION.md`.
 
 ## Artifacts
 
@@ -115,26 +115,33 @@ Saved to `models/isolation_forest/v1/` (gitignored):
 | `feature_names.joblib` | Ordered feature name list |
 | `preprocessor.joblib` | Standalone preprocessor (standalone mode only) |
 | `metadata.json` | Version, timestamp, params, score convention, caveats |
-| `evaluation_test.json` | Held-out test metrics |
+| `evaluation_test.json` | Held-out test metrics at baseline threshold=0.0 |
+| `evaluation_test_calibrated.json` | Held-out test metrics at calibrated threshold=0.468 |
+| `threshold_calibration.json` | Selected threshold metadata and optimization objective |
 
-## Inference Interface
+## Inference & Feature Mapping Interface
 
 ```python
 from src.ml.if_predictor import AnomalyPredictor
+from src.ml.feature_mapper import canonical_to_if_features
 
 predictor = AnomalyPredictor()  # loads once, never retrains
 scores = predictor.score(X_df)  # np.ndarray, higher = more anomalous
 
-# Single-transaction (Agent 1 integration point)
+# Single-transaction inference from raw feature dict
 result = predictor.score_transaction({"TransactionAmt": 250.0, ...})
 # result["anomaly_score"]  — float, NOT a probability
 # result["is_anomaly"]     — bool
 # result["score_note"]     — explicit disclaimer
+
+# Single-transaction inference from CanonicalTransaction
+features = canonical_to_if_features(canonical_tx)
+result = predictor.score_transaction(features)
 ```
 
 ## Integration with Sentinel AI
 
-The `score_transaction()` output is the Agent 1 entry point.
+The `score_transaction()` output is consumed by `Agent1Scorer` (`src/ml/agent1_scorer.py`).
 
 The IF `anomaly_score` and the XGBoost `fraud_probability` are kept in
 separate dicts with different key names. They are reported separately.
@@ -151,15 +158,12 @@ No combined score is produced without a tested fusion strategy.
 | Evaluation | Against IEEE-CIS labels | Against IEEE-CIS labels (correlation only) |
 | Artifact dir | `models/xgboost/v1/` | `models/isolation_forest/v1/` |
 
-## Testing
+## Testing & Verification
 
-109 total tests (61 XGBoost + 48 IF). Run with:
+Automated tests covering Isolation Forest training, prediction, scoring, and evaluation:
 
+```bash
+.venv/bin/python -m pytest tests/test_if_trainer.py tests/test_if_predictor.py tests/test_if_evaluator.py -v
 ```
-.venv/bin/python -m pytest tests/ -v
-```
 
-IF-specific test files:
-- `tests/test_if_trainer.py`
-- `tests/test_if_predictor.py`
-- `tests/test_if_evaluator.py`
+Total project test suite: **265 tests passing** (`.venv/bin/python -m pytest tests/`).

@@ -40,26 +40,26 @@ Threshold calibration uses the VALIDATION split only. The test set is evaluated 
 
 ## Agent 1 Integration
 
-Status: **ML LAYER COMPLETE — GRAPH WIRING PENDING**
+Status: **ML LAYER COMPLETE — GRAPH WIRING SCHEDULED FOR PHASE 4**
 
 `src/ml/agent1_scorer.py` provides the ML inference entry point for Agent 1.
 `src/ml/feature_mapper.py` provides CanonicalTransaction → IEEE-CIS feature mapping.
 
-LangGraph node wiring is blocked pending merge of the `feature/canonical-schema` branch.
+The CanonicalTransaction Pydantic schema and adapters (`src/schemas/`) are integrated and verified (Phase 1 prerequisite). The LangGraph node wiring, state graph compilation, and score fusion (`combined_confidence`) are explicitly scheduled for Phase 4 (next week).
 
-## Dataset
+## Datasets and Full-Data Capability
 
 Primary dataset for training and evaluation:
-
-**IEEE-CIS Fraud Detection Dataset** — `dataset/raw/ieee_cis/`
+- **IEEE-CIS Fraud Detection Dataset** — `dataset/raw/ieee_cis/` (590,540 raw transactions, 144,233 identity rows).
+  - Software supports full-dataset training via `SENTINEL_SAMPLE_FRAC=full` or omitting the environment variable.
+  - Baseline reported metrics below were evaluated on a **15% stratified sample** (88,581 transactions) for rapid development.
+  - Full-dataset training requires $\ge 16\text{GB}$ available host RAM to avoid OOM conditions during pandas merge and preprocessing.
 
 Supplementary dataset:
-
-PaySim.
+- **PaySim** — `dataset/raw/paysim/` (Synthetic mobile-money transactions for graph and network testing).
 
 Additional dataset:
-
-Custom Synthetic India Dataset — for Indian scenario testing only.
+- **Custom Synthetic India Dataset** — `dataset/processed/custom_india/` (for Indian scenario testing only).
 
 Do NOT combine IEEE-CIS and India Synthetic results or present one as the other.
 

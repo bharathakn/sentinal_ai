@@ -62,7 +62,12 @@ def main() -> None:
     model_dir = os.environ.get("SENTINEL_IF_MODEL_DIR", "models/isolation_forest")
     xgb_prep_path = os.environ.get("SENTINEL_XGB_PREP_PATH", "") or None
     sample_frac_str = os.environ.get("SENTINEL_SAMPLE_FRAC", "")
-    sample_frac = float(sample_frac_str) if sample_frac_str else None
+    if sample_frac_str.strip().lower() in ("none", "full", "all"):
+        sample_frac = None
+    elif sample_frac_str.strip():
+        sample_frac = float(sample_frac_str.strip())
+    else:
+        sample_frac = None
 
     logger.info("=== Sentinel AI — Isolation Forest Training Pipeline ===")
     logger.info("Data dir        : %s", data_dir)

@@ -78,44 +78,55 @@ The operationally relevant metrics are:
   This is **~5× better than random**, showing real correlation between
   anomaly scores and fraud labels.
 
-### Threshold Recommendation
+### Threshold Calibration (Phase 3 Completed)
 
-The anomaly score distribution shows all values > 0.31 on training data.
-The decision threshold should be raised to a high percentile of the
-anomaly score distribution to achieve operational precision.
+In Phase 3, threshold calibration was executed using `scripts/run_threshold_calibration.py`.
+Candidate thresholds were swept across [p90, p99] on a held-out calibration split (10% of training data with labels, held out from IF training).
 
-**Recommended next step:** Plot the score distribution on training data and
-set the threshold at the 95th–99th percentile. For example, if the 95th
-percentile of training scores is 0.40, set `threshold=0.40`. Evaluate
-precision/recall trade-off on held-out validation data.
+**Calibrated Operating Point:**
+- **Selected Threshold:** **0.4679** (F1-optimal on validation/calibration split; evaluated ONCE on held-out test set)
 
-**Do not set the threshold by repeatedly evaluating against the test set.**
+| Metric | Trivial Baseline (0.00) | Calibrated (**0.4679**) | Operational Impact |
+|---|---|---|---|
+| Precision | 0.0356 | **0.2618** | Increased from base fraud rate to ~26% |
+| Recall | 1.0000 | **0.3333** | Catches 33.3% of fraud without supervised labels |
+| F1-score | 0.0687 | **0.2933** | +326% relative improvement |
+| False Positive Rate (FPR) | 1.0000 | **0.034644** | False alarms cut from 100% to **3.5%** |
+| False Negative Rate (FNR) | 0.0000 | **0.666667** | Expected for unsupervised statistical model |
+| Accuracy | 0.0356 | **0.9315** | Drastic reduction in false positive flags |
+| ROC-AUC | 0.8036 | **0.8036** | Unchanged (threshold-independent) |
+| PR-AUC | 0.1784 | **0.1784** | Unchanged (threshold-independent) |
 
-### Comparison with XGBoost (at their respective thresholds)
+Confusion matrix (test, threshold=0.4679):
 
-| Metric | XGBoost (threshold=0.5) | IF (threshold=0.0) |
+|  | Pred-Legit | Pred-Anomaly |
 |---|---|---|
-| PR-AUC | 0.6620 | 0.1784 |
+| **Act-Legit (8,544)** | 8,248 | 296 |
+| **Act-Fraud (315)** | 210 | 105 |
+
+### Comparison with XGBoost (at respective calibrated thresholds)
+
+| Metric | XGBoost (threshold=0.80) | IF (threshold=0.4679) |
+|---|---|---|
+| PR-AUC | 0.6620 | 0.1784 (~5× random) |
 | ROC-AUC | 0.9342 | 0.8036 |
+| Precision | 0.7143 | 0.2618 |
+| Recall | 0.5397 | 0.3333 |
+| F1-score | 0.6148 | 0.2933 |
+| False Positive Rate | 0.0080 | 0.0346 |
 | Nature | Supervised | Unsupervised |
-| Interpretation | Fraud probability | Anomaly score |
+| Interpretation | Fraud probability | Statistical anomaly score |
 
 XGBoost significantly outperforms IF as an isolated fraud detector because it
 is trained directly on fraud labels. IF's value is as an **unsupervised
-cross-check**: it can surface unusual transactions not seen in historical fraud
-patterns.
+cross-check**: it surfaces statistically unusual transactions without requiring historical fraud labels.
 
 ### Artifact Consistency Check
 
 Score reload consistency: **max_diff = 0.00e+00 ✓** (bit-identical)
 
-### Remaining Limitations
+### Verified Limitations & Sample Distinction
 
-1. **Threshold calibration required**: Default threshold=0.0 is not operational.
-   Calibrate on validation data before deployment.
-2. **15% sample**: Full-dataset training may produce different score distributions.
-3. **contamination='auto'**: This setting produces a model where all scores on
-   this dataset exceed 0.0. Explicitly setting contamination (e.g. 0.05) would
-   shift the threshold but would require careful justification.
-4. **Anomaly ≠ Fraud**: The model is not a fraud detector. It is an anomaly
-   detector whose scores correlate with fraud labels.
+1. **15% sample**: Evaluated on 15% IEEE-CIS sample (88,581 transactions). Full-dataset training (590k transactions) requires $\ge 16\text{GB}$ RAM and is supported in software.
+2. **contamination='auto'**: This setting causes uncalibrated raw scores to exceed 0.0, necessitating the calibrated 0.4679 threshold.
+3. **Anomaly ≠ Fraud**: Isolation Forest is an anomaly detector whose scores correlate with fraud labels. It must never be presented as an independent fraud probability.

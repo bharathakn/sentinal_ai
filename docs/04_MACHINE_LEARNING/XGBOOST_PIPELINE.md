@@ -49,11 +49,11 @@ Environment variable overrides:
 
 ## Preprocessing
 
-1. Numeric columns: median imputation.
-2. Categorical columns: constant `MISSING` imputation + OrdinalEncoder (unknown → -1).
-3. Pipeline fitted **on training split only**.
+1. Numeric columns: median imputation (`SimpleImputer(strategy='median')`).
+2. Categorical columns: constant `MISSING` imputation + `OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)`.
+3. Pipeline fitted **on training split only** (`build_preprocessing_pipeline()`).
 4. Reused identically at inference time.
-5. Reusable by the future Isolation Forest implementation.
+5. Reused directly by the Isolation Forest implementation.
 
 ## Class Imbalance
 
@@ -67,8 +67,8 @@ On the 15% sample: scale_pos_weight = 27.11 (68,343 negatives / 2,521 positives)
 | Split | Fraction | Purpose |
 |---|---|---|
 | Train | 80% | Model fitting |
-| Validation | 10% | Early stopping and model selection |
-| Test | 10% | Final held-out evaluation (used once) |
+| Validation | 10% | Early stopping, hyperparameter check, and threshold calibration |
+| Test | 10% | Final held-out evaluation (evaluated once) |
 
 Stratified by `isFraud` to preserve fraud rate across splits.
 
@@ -79,7 +79,7 @@ See `models/xgboost/v1/metadata.json` for full hyperparameter record.
 Key defaults:
 
 - `objective`: `binary:logistic`
-- `eval_metric`: `aucpr` (PR-AUC — best for imbalanced fraud data)
+- `eval_metric`: `aucpr` (PR-AUC — primary metric for imbalanced fraud data)
 - `n_estimators`: 500
 - `max_depth`: 6
 - `learning_rate`: 0.05
@@ -96,49 +96,55 @@ Saved to `models/xgboost/v1/` (gitignored):
 | `xgb_model.joblib` | Fitted XGBClassifier |
 | `feature_names.joblib` | Ordered feature name list |
 | `metadata.json` | Version, timestamp, hyperparams, data stats |
-| `evaluation_val.json` | Validation set metrics |
-| `evaluation_test.json` | Test set metrics (final) |
+| `evaluation_val.json` | Baseline validation set metrics (threshold=0.5) |
+| `evaluation_test.json` | Baseline test set metrics (threshold=0.5) |
+| `evaluation_val_calibrated.json` | Calibrated validation metrics (threshold=0.8) |
+| `evaluation_test_calibrated.json` | Calibrated test metrics (threshold=0.8) |
+| `threshold_calibration.json` | Selected threshold metadata and optimization objective |
 | `shap_global_importance.csv` | Top features by mean \|SHAP\| |
 
-## Classification Threshold
+## Classification Thresholds
 
-Default: **0.5**
-
-This is documented in `metadata.json`. The threshold can be adjusted on
-validation data to meet operational precision/recall requirements without
-retraining.
+- **Baseline Threshold**: `0.5` (default). Precision=0.3748, Recall=0.7270, F1=0.4946.
+- **Calibrated Threshold**: `0.80` (selected via F1-maximization on validation set). Precision=0.7143, Recall=0.5397, F1=0.6148, FPR=0.0080, Accuracy=0.9760.
+- Calibration script: `scripts/run_threshold_calibration.py`.
+- Full details: `THRESHOLD_CALIBRATION.md`.
 
 ## SHAP Explainability
 
-- Global importance: mean |SHAP| across a random sample of training rows.
-- Per-prediction: individual SHAP values showing feature direction and magnitude.
+- Global importance: mean |SHAP| across sample of preprocessed rows (`src/ml/explainer.py`).
+- Per-prediction: individual SHAP values showing feature direction and magnitude (`explain_prediction()`).
 - SHAP values describe model behaviour. They are **not proof of fraud**.
 
-## Inference Interface
+## Inference & Feature Mapping Interface
 
 ```python
 from src.ml.predictor import FraudPredictor
+from src.ml.feature_mapper import canonical_to_xgb_features
 
-predictor = FraudPredictor()  # loads artifacts once at startup
+predictor = FraudPredictor()  # loads artifacts once at startup, never retrains
+
+# Inference from raw IEEE-CIS feature dict
 result = predictor.predict_transaction({"TransactionAmt": 250.0, "ProductCD": "W", ...})
 # result["fraud_probability"], result["is_fraud_predicted"], result["note"]
-```
 
-The predictor accepts a CanonicalTransaction-compatible dict via a documented
-feature-mapping layer (future work for Agent 1 integration).
+# Inference from CanonicalTransaction via feature mapper
+features = canonical_to_xgb_features(canonical_tx)
+result = predictor.predict_transaction(features)
+```
 
 ## Separation of Concerns
 
 - Training is separate from inference.
 - Artifacts are loaded once at startup; the model is never retrained on application start.
-- The predictor is the only inference entry point.
+- The predictor is the inference entry point; `Agent1Scorer` bundles both XGBoost and Isolation Forest signals for Agent 1.
 
-## Testing
+## Testing & Verification
 
-61 unit tests covering all modules. Run with:
+Automated tests covering the XGBoost pipeline, loader, preprocessor, predictor, evaluator, explainer, feature mapper, and threshold calibration:
 
+```bash
+.venv/bin/python -m pytest tests/test_trainer.py tests/test_predictor.py tests/test_evaluator.py tests/test_explainer.py tests/test_preprocessor.py tests/test_threshold_calibration.py tests/test_feature_mapper.py -v
 ```
-.venv/bin/python -m pytest tests/ -v
-```
 
-All tests use small synthetic fixtures; they do not require the IEEE-CIS dataset.
+Total project test suite: **265 tests passing** (`.venv/bin/python -m pytest tests/`).

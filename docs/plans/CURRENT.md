@@ -16,7 +16,7 @@ Sentinel AI
 
 ## Current Objective
 
-Phase 3 final wrap-up and verification complete. Repository is fully verified, tested (264/264 tests passing), and ready for Phase 4.
+Phase 3 final wrap-up and verification complete. Repository is fully verified, tested (265/265 tests passing), and ready for Phase 4.
 
 ## Completed
 
@@ -59,7 +59,7 @@ Phase 3 final wrap-up and verification complete. Repository is fully verified, t
   - Threshold calibration runner script: `scripts/run_threshold_calibration.py`
   - CanonicalTransaction → IEEE-CIS feature mapper (`src/ml/feature_mapper.py`) with support for real canonical schema adapters
   - Agent 1 ML scoring integration (`src/ml/agent1_scorer.py`) with full test coverage (`tests/test_agent1_scorer.py`)
-  - 264 total automated tests across schemas and ML components — all passing
+  - 265 total automated tests across schemas and ML components — all passing
   - Documentation: `docs/04_MACHINE_LEARNING/THRESHOLD_CALIBRATION.md`, `docs/04_MACHINE_LEARNING/ML_OVERVIEW.md`
 
 ## Full-Dataset Evaluation Status and Hardware Limitations

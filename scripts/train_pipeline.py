@@ -60,7 +60,12 @@ def main() -> None:
     data_dir = os.environ.get("SENTINEL_DATA_DIR", "dataset/raw/ieee_cis")
     model_dir = os.environ.get("SENTINEL_MODEL_DIR", "models/xgboost")
     sample_frac_str = os.environ.get("SENTINEL_SAMPLE_FRAC", "")
-    sample_frac = float(sample_frac_str) if sample_frac_str else None
+    if sample_frac_str.strip().lower() in ("none", "full", "all"):
+        sample_frac = None
+    elif sample_frac_str.strip():
+        sample_frac = float(sample_frac_str.strip())
+    else:
+        sample_frac = None
 
     logger.info("=== Sentinel AI — XGBoost Training Pipeline ===")
     logger.info("Data dir   : %s", data_dir)

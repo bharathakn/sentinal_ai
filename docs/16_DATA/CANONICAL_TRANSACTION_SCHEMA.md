@@ -14,6 +14,14 @@ Sentinel AI ingests transactions from three datasets with entirely different sch
 
 Rather than have every agent understand each dataset's raw column names, Sentinel AI defines a **canonical internal transaction representation** (`CanonicalTransaction`) that all datasets are normalized into before entering the agent pipeline.
 
+> [!IMPORTANT]
+> **Dataset Separation Boundary**: A shared canonical schema does **NOT** merge all three datasets into one combined training dataset. Each dataset retains its distinct provenance, operational domain, and evaluation boundaries:
+> - **IEEE-CIS** is the primary source for machine learning model training and SHAP explainability.
+> - **PaySim** is used exclusively for graph and network analysis topology testing.
+> - **India Synthetic** is used exclusively for local Indian payment rail demonstrations and regulatory rule compliance scenarios.
+> 
+> The schema provides normalization for agent consumption, not cross-dataset data pooling.
+
 ---
 
 ## 2. Design Principles
@@ -23,6 +31,7 @@ Rather than have every agent understand each dataset's raw column names, Sentine
 - All optional fields are explicitly `Optional` to accommodate dataset gaps gracefully.
 - Business rules (non-negative amount, valid currency, non-empty ID) are enforced at ingestion via Pydantic v2 validators.
 - The schema is intentionally broad to accommodate future datasets and live banking data.
+- **ML Feature Mapping**: When scoring a `CanonicalTransaction` with the ML models, `src/ml/feature_mapper.py` (`canonical_to_xgb_features` / `canonical_to_if_features`) extracts available fields (`amount`, `card_network`, `addr1`/`zip_code`, `email_domain`) and delegates unmapped fields to median/mode imputation in the pipeline.
 
 ---
 

@@ -47,12 +47,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def calibrate_xgboost(sample_frac: float = 0.15) -> None:
+def calibrate_xgboost(sample_frac: float | None = 0.15) -> None:
     """Calibrate XGBoost classification threshold."""
     logger.info("=== XGBoost Threshold Calibration ===")
 
     # Reconstruct the same split used during training
-    logger.info("Loading IEEE-CIS dataset (%.0f%% sample) …", sample_frac * 100)
+    sample_label = f"{sample_frac * 100:.0f}% sample" if sample_frac is not None else "full dataset"
+    logger.info("Loading IEEE-CIS dataset (%s) …", sample_label)
     X, y = load_ieee_cis(data_dir="dataset/raw/ieee_cis", sample_frac=sample_frac)
 
     # Same split params as trainer.py defaults
@@ -95,7 +96,7 @@ def calibrate_xgboost(sample_frac: float = 0.15) -> None:
         threshold=chosen["threshold"],
         dataset_label="validation",
         model_version=metadata.get("model_version"),
-        split_strategy="stratified 80/10/10 (15% IEEE-CIS sample)",
+        split_strategy=f"stratified 80/10/10 ({sample_label} IEEE-CIS)",
     )
     print_evaluation_report(val_metrics_calibrated)
 
@@ -106,7 +107,7 @@ def calibrate_xgboost(sample_frac: float = 0.15) -> None:
         threshold=chosen["threshold"],
         dataset_label="test",
         model_version=metadata.get("model_version"),
-        split_strategy="stratified 80/10/10 (15% IEEE-CIS sample)",
+        split_strategy=f"stratified 80/10/10 ({sample_label} IEEE-CIS)",
     )
     print_evaluation_report(test_metrics_calibrated)
 
@@ -135,11 +136,12 @@ def calibrate_xgboost(sample_frac: float = 0.15) -> None:
     )
 
 
-def calibrate_iforest(sample_frac: float = 0.15) -> None:
+def calibrate_iforest(sample_frac: float | None = 0.15) -> None:
     """Calibrate Isolation Forest anomaly score threshold."""
     logger.info("=== Isolation Forest Threshold Calibration ===")
 
-    logger.info("Loading IEEE-CIS dataset (%.0f%% sample) …", sample_frac * 100)
+    sample_label = f"{sample_frac * 100:.0f}% sample" if sample_frac is not None else "full dataset"
+    logger.info("Loading IEEE-CIS dataset (%s) …", sample_label)
     X, y = load_ieee_cis(data_dir="dataset/raw/ieee_cis", sample_frac=sample_frac)
 
     # Same split as if_trainer.py
@@ -226,5 +228,13 @@ def calibrate_iforest(sample_frac: float = 0.15) -> None:
 
 
 if __name__ == "__main__":
-    calibrate_xgboost()
-    calibrate_iforest()
+    import os
+    env_frac = os.environ.get("SENTINEL_SAMPLE_FRAC", "")
+    if env_frac.strip().lower() in ("none", "full", "all"):
+        sample_frac = None
+    elif env_frac.strip():
+        sample_frac = float(env_frac.strip())
+    else:
+        sample_frac = 0.15
+    calibrate_xgboost(sample_frac=sample_frac)
+    calibrate_iforest(sample_frac=sample_frac)

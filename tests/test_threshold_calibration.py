@@ -182,3 +182,62 @@ class TestPrintSweepSummary:
         print_sweep_summary(df)
         out = capsys.readouterr().out
         assert "Threshold" in out
+
+
+class TestCalibrationScriptFullDataReadiness:
+    """Verifies that calibration functions accept sample_frac=None without TypeError."""
+
+    def test_sample_frac_none_accepted_by_script_helpers(self, monkeypatch):
+        from scripts.run_threshold_calibration import calibrate_xgboost
+        import pandas as pd
+
+        # Mock load_ieee_cis to return a small dummy without reading 1.3GB CSV
+        dummy_df = pd.DataFrame({
+            "TransactionAmt": [10.0, 20.0, 30.0, 40.0, 50.0] * 10,
+            "ProductCD": ["W", "C", "W", "R", "S"] * 10,
+            "card1": [1000, 2000, 3000, 4000, 5000] * 10,
+        })
+        dummy_y = pd.Series([0, 0, 1, 0, 0] * 10)
+
+        called_with_frac = []
+
+        def mock_load(data_dir=None, sample_frac=None, **kwargs):
+            called_with_frac.append(sample_frac)
+            return dummy_df, dummy_y
+
+        monkeypatch.setattr("scripts.run_threshold_calibration.load_ieee_cis", mock_load)
+
+        # Mock load_artifacts to return dummy model and pipeline
+        class DummyModel:
+            def predict_proba(self, X):
+                return np.column_stack([np.full(len(X), 0.7), np.full(len(X), 0.3)])
+
+        class DummyPipeline:
+            def transform(self, X):
+                return np.zeros((len(X), 3))
+
+        monkeypatch.setattr(
+            "scripts.run_threshold_calibration.load_artifacts",
+            lambda: {
+                "model": DummyModel(),
+                "pipeline": DummyPipeline(),
+                "metadata": {"model_version": "test"},
+            },
+        )
+
+        from unittest.mock import mock_open
+        monkeypatch.setattr("builtins.open", mock_open())
+        monkeypatch.setattr(
+            "scripts.run_threshold_calibration.save_threshold_report",
+            lambda *args, **kwargs: None,
+        )
+
+        # Call with sample_frac=None (full dataset mode)
+        # Should execute without TypeError on sample_frac * 100
+        try:
+            calibrate_xgboost(sample_frac=None)
+        except Exception as e:
+            # File writing or minor mock issue is ok, but TypeError on sample_frac is a bug
+            assert not isinstance(e, TypeError)
+
+        assert called_with_frac == [None]

@@ -58,24 +58,44 @@ Confusion matrix (validation):
 | ROC-AUC | 0.9342 |
 | **PR-AUC** | **0.6620** |
 
-Confusion matrix (test):
+Confusion matrix (test, threshold=0.5):
 
 |  | Pred-Legit | Pred-Fraud |
 |---|---|---|
 | **Act-Legit** | 8,162 | 382 |
 | **Act-Fraud** | 86 | 229 |
 
-### Interpretation
+---
 
-- **ROC-AUC 0.934**: Very strong discrimination between fraud and legitimate transactions.
-- **PR-AUC 0.662**: Meaningful detection on a severely imbalanced dataset (base rate ~3.5%).
-  A random classifier would achieve PR-AUC ≈ 0.035. This is ~19× better than random.
-- **Recall 0.727**: The model catches ~73% of actual fraud cases at the default threshold.
-- **Precision 0.375**: ~38% of flagged transactions are actual fraud at the default threshold.
-  This is expected at a 0.5 threshold with high class imbalance; threshold adjustment can
-  trade recall for precision based on operational requirements.
-- **Accuracy is not reported as the primary metric.** A trivial all-zeros classifier would
-  achieve ~96.4% accuracy on this dataset. That is meaningless for fraud detection.
+## XGBoost — Calibrated Operating Point (Phase 3)
+
+**Run date:** 2026-10-15  
+**Threshold:** **0.80** (selected by maximizing F1 on the validation split; evaluated ONCE on held-out test split)
+
+### Held-Out Test Set Metrics (Calibrated Threshold = 0.80)
+
+| Metric | Baseline (0.50) | Calibrated (**0.80**) | Change / Impact |
+|---|---|---|---|
+| Precision | 0.3748 | **0.7143** | +90.6% relative (false alarms cut by 82%) |
+| Recall | 0.7270 | **0.5397** | -25.8% (fewer caught, higher confidence) |
+| F1-score | 0.4946 | **0.6148** | +24.3% relative (optimal F1 balance) |
+| Accuracy | 0.9472 | **0.9760** | Higher overall correct classifications |
+| False Positive Rate (FPR) | 0.0447 | **0.007959** | Reduced from 4.5% to < 0.8% |
+| False Negative Rate (FNR) | 0.2730 | **0.460317** | 46.0% missed fraud at strict threshold |
+| ROC-AUC | 0.9342 | **0.9342** | Unchanged (threshold-independent) |
+| PR-AUC | 0.6620 | **0.6620** | Unchanged (threshold-independent) |
+
+Confusion matrix (test, threshold=0.80):
+
+|  | Pred-Legit | Pred-Fraud |
+|---|---|---|
+| **Act-Legit (8,544)** | 8,476 | 68 |
+| **Act-Fraud (315)** | 145 | 170 |
+
+### Interpretation of Calibration
+
+- **False alerts plummeted**: from 382 down to 68 on the test set. In a compliance operations workflow, this drastically reduces analyst workload while maintaining an investigation precision of >71%.
+- **Test-set isolation enforced**: The threshold was selected on the validation split (`y_val`, `val_proba`) using `src/ml/threshold_calibration.py`. The test set was touched only once after threshold selection.
 
 ### Top 10 Features by Mean |SHAP|
 
@@ -100,18 +120,14 @@ individual feature makes a transaction fraudulent.
 Predictions reloaded from saved artifacts: **max_diff = 0.00e+00 ✓**
 (Bit-identical predictions before and after serialisation.)
 
-### Limitations
+### Limitations & Sample Distinction
 
-- Results are from a **15% sample** of the full IEEE-CIS training data for a
-  rapid initial verification. Full-dataset training is expected to improve metrics.
-- Threshold of 0.5 is the default; operational threshold should be tuned on the
-  validation set according to the institution's precision/recall requirements.
-- The model is trained on anonymised Vesta-engineered features; interpretability
-  of specific V-columns is limited by design of the original dataset.
-- No temporal cross-validation has been performed; the split is cross-sectional.
+- All results above are from a **15% stratified sample** of the IEEE-CIS training data (88,581 transactions).
+- They represent a validated, reproducible baseline. They must NOT be cited as full-dataset performance.
+- The model is trained on anonymised Vesta-engineered features; interpretability of specific V-columns is limited by design of the original dataset.
+- Temporal structure: The split is cross-sectional with stratification.
 
 ### Next Steps
 
-- Run `scripts/train_pipeline.py` without `SENTINEL_SAMPLE_FRAC` for full-dataset metrics.
-- Tune classification threshold on validation set.
-- Implement Isolation Forest for unsupervised cross-check (Phase 2).
+- **Full-dataset execution**: Run `SENTINEL_SAMPLE_FRAC=full python scripts/train_pipeline.py` on a host with $\ge 16\text{GB}$ RAM to generate full 590,540-row metrics.
+- **Phase 4**: Wire `Agent1Scorer` into the Agent 1 LangGraph node (scheduled next week).
