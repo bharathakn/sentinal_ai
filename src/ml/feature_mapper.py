@@ -55,10 +55,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Avoid circular import and optional Pydantic dependency at module load time.
-    # The CanonicalTransaction lives in the feature/canonical-schema branch;
-    # when that branch is merged, the import becomes unconditional.
-    pass
+    from ..schemas.canonical_transaction import CanonicalTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -109,18 +106,31 @@ def canonical_to_xgb_features(transaction: Any) -> dict[str, Any]:
 
     # --- card4 (bank/card network — approximation) ---
     try:
-        bank = getattr(transaction.sender, "bank_name", None)
-        if bank:
-            features["card4"] = str(bank).lower()[:20]
-    except AttributeError:
+        card_net = None
+        if hasattr(transaction, "metadata") and transaction.metadata is not None:
+            card_net = getattr(transaction.metadata, "card_network", None)
+        if not card_net and hasattr(transaction, "sender") and transaction.sender is not None:
+            card_net = getattr(transaction.sender, "bank_name", None)
+        if card_net:
+            features["card4"] = str(card_net).lower()[:20]
+    except (AttributeError, TypeError):
         pass
 
-    # --- addr1 (billing region code) ---
+    # --- addr1 (billing region / zip code) ---
     try:
-        region = getattr(transaction.location, "region_code", None)
+        region = None
+        if hasattr(transaction, "location") and transaction.location is not None:
+            region = (
+                getattr(transaction.location, "zip_code", None)
+                or getattr(transaction.location, "region_code", None)
+                or getattr(transaction.location, "state", None)
+            )
         if region is not None:
-            features["addr1"] = region
-    except AttributeError:
+            try:
+                features["addr1"] = float(region)
+            except (ValueError, TypeError):
+                features["addr1"] = region
+    except (AttributeError, TypeError):
         pass
 
     # --- P_emaildomain (payer email domain) ---

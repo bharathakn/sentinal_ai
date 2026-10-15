@@ -162,3 +162,44 @@ class TestDescribeMapping:
     def test_mapping_note_warns_about_nan_imputation(self):
         desc = describe_mapping()
         assert "NaN" in desc["mapping_note"] or "nan" in desc["mapping_note"].lower()
+
+
+class TestRealCanonicalTransactionMapping:
+    """Test mapping directly with real CanonicalTransaction instances."""
+
+    def test_map_canonical_transaction_from_ieee_cis_adapter(self):
+        from src.schemas.adapters.ieee_cis_adapter import IEEECISAdapter
+
+        raw_row = {
+            "TransactionID": 2987000,
+            "TransactionAmt": 68.5,
+            "TransactionDT": 86400,
+            "ProductCD": "W",
+            "card4": "discover",
+            "card6": "credit",
+            "addr1": 315.0,
+            "addr2": 87.0,
+            "P_emaildomain": "gmail.com",
+            "R_emaildomain": "yahoo.com",
+        }
+        canonical_tx = IEEECISAdapter.from_row(raw_row)
+
+        features = canonical_to_xgb_features(canonical_tx)
+        assert features["TransactionAmt"] == 68.5
+        assert features["card4"] == "discover"
+        assert features["addr1"] == 315.0
+        assert features["P_emaildomain"] == "gmail.com"
+        assert features["R_emaildomain"] == "yahoo.com"
+
+    def test_map_canonical_transaction_missing_optional_fields(self):
+        from src.schemas.canonical_transaction import CanonicalTransaction
+
+        tx = CanonicalTransaction(
+            raw_record_id="MIN001",
+            source_dataset="IEEE_CIS",
+            amount=Decimal("42.50"),
+        )
+        features = canonical_to_xgb_features(tx)
+        assert features["TransactionAmt"] == 42.5
+        assert "card4" not in features
+        assert "addr1" not in features
