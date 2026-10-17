@@ -15,13 +15,15 @@ Sentinel AI
 - Phase 5 — Mock Evidence Infrastructure: COMPLETE
 - Phase 6 — Agent 2 Evidence Gatherer: COMPLETE
 - Phase 7 — Neo4j Graph Infrastructure: COMPLETE
+- Phase 8 — Agent 3 Network Analyser: COMPLETE
 
-**Next Planned Phase**: Phase 8 — Agent 4 Risk Assessor (aggregate risk scoring).
+**Next Planned Phase**: Phase 9 — Agent 4 Risk Assessor (aggregate risk scoring
+from Agent 1/2/3 outputs).
 
 ## Current Objective
 
-Phase 7 complete. 649/649 tests passing (70 unit + 20 live integration).
-Repository ready for Phase 8.
+Phase 8 complete. 739/739 tests passing (81 unit + 9 live integration for Agent 3;
+full suite Phases 1–8 intact).
 
 ## Completed
 
@@ -53,22 +55,32 @@ Repository ready for Phase 8.
   - All 649 tests passing; Phases 1–6 fully intact.
   - Branch: `feature/neo4j-graph`
   - Commit: `feat: add Neo4j graph infrastructure`
+- **Phase 8**: Agent 3 Network Analyser.
+  - `NetworkAnalyserAgent` — LangGraph-compatible callable; analyses account network.
+  - 7 pattern detectors: Layering, Structuring, Fan-in, Fan-out, Mule-like,
+    Rapid Forwarding, Suspicious Cluster.
+  - `Agent3Config` — centralised thresholds with env-var overrides and disclaimers.
+  - `Agent3Output`, `NetworkFinding`, `LayeringPath`, `TransferRef` — typed, frozen schemas.
+  - `SentinelState.agent3_output` — fully wired into pipeline state.
+  - `docs/06_AGENT3/NETWORK_ANALYSER.md` — full detector documentation.
+  - 81 unit tests (mocked) + 9 live Neo4j integration tests.
+  - All 739 tests passing; Phases 1–7 fully intact.
+  - Branch: `feature/agent3-network-analyser`
+  - Commit: `feat: implement agent 3 network analyser`
 
 ## Next Major Milestones
 
-1. **Phase 8: Agent 4 (Risk Assessor)** — aggregate risk scoring from Agent 1/2/3 outputs.
-2. **Phase 9: Agent 5 (Explanation Generator)** — Groq LLM narrative.
-3. **Agent 3 full implementation** — network-risk analysis using the Phase 7 graph.
-4. **LangGraph installation** — wire agents into `StateGraph(SentinelState)`.
-5. **MongoDB case persistence** — investigation case schema and storage.
-6. **FastAPI ingestion endpoint** — accept raw transaction, run pipeline.
-7. **Investigation Dashboard**.
+1. **Phase 9: Agent 4 (Risk Assessor)** — aggregate risk scoring from Agent 1/2/3 outputs.
+2. **Phase 10: Agent 5 (Explanation Generator)** — Groq LLM narrative.
+3. **LangGraph installation** — wire agents into `StateGraph(SentinelState)`.
+4. **MongoDB case persistence** — investigation case schema and storage.
+5. **FastAPI ingestion endpoint** — accept raw transaction, run pipeline.
+6. **Investigation Dashboard**.
 
 ## Current Blockers
 
 - LangGraph not installed. `SentinelState` TypedDict is LangGraph-compatible;
   wiring into `StateGraph` deferred until LangGraph is added to the stack.
-- Agent 3 full network-risk analysis logic not yet implemented (graph infrastructure ready).
 - Full-dataset XGBoost training requires ≥16 GB RAM (current host ~14 GB).
 
 ## Important Rule

@@ -9,7 +9,7 @@ Architecture
 ------------
 Agent 1 (Anomaly Detector)  →  writes agent1_output
 Agent 2 (Evidence Gatherer) →  reads agent1_output, writes agent2_output
-Agent 3 (Network Analyser)  →  reads agent2_output, writes agent3_output (Phase 7 infrastructure)
+Agent 3 (Network Analyser)  →  reads agent2_output, writes agent3_output
 Agent 4 (Risk Assessor)     →  reads agent3_output, writes agent4_output (future)
 Agent 5 (Explanation Gen.)  →  reads agent4_output, writes final_report (future)
 
@@ -32,6 +32,7 @@ from typing_extensions import TypedDict
 from ..schemas.canonical_transaction import CanonicalTransaction
 from .agent1.output_schema import Agent1Output
 from .agent2.output_schema import Agent2Output
+from .agent3.output_schema import Agent3Output
 
 
 class SentinelState(TypedDict, total=False):
@@ -42,7 +43,7 @@ class SentinelState(TypedDict, total=False):
     transaction   : The canonical transaction being investigated. Required.
     agent1_output : Output from Agent 1 (Anomaly Detector). Set after Agent 1.
     agent2_output : Output from Agent 2 (Evidence Gatherer). Set after Agent 2.
-    agent3_output : Reserved for Agent 3 (Network Analyser). Set in Phase 7 agent impl.
+    agent3_output : Output from Agent 3 (Network Analyser). Set after Agent 3.
 
     Agents 4–5 fields are reserved for future phases.
     """
@@ -50,6 +51,6 @@ class SentinelState(TypedDict, total=False):
     transaction: CanonicalTransaction
     agent1_output: Optional[Agent1Output]
     agent2_output: Optional[Agent2Output]
-    # agent3_output: Optional[Agent3Output]   # Phase 7: Network Analyser — graph output
-    # agent4_output: Optional[Agent4Output]   # Phase 8: Risk Assessor
-    # agent5_output: Optional[Agent5Output]   # Phase 9: Explanation Generator
+    agent3_output: Optional[Agent3Output]
+    # agent4_output: Optional[Agent4Output]   # Phase 9: Risk Assessor
+    # agent5_output: Optional[Agent5Output]   # Phase 10: Explanation Generator
