@@ -40,12 +40,37 @@ Threshold calibration uses the VALIDATION split only. The test set is evaluated 
 
 ## Agent 1 Integration
 
-Status: **ML LAYER COMPLETE — GRAPH WIRING SCHEDULED FOR PHASE 4**
+Status: **PHASE 4 COMPLETE — AGENT 1 ANOMALY DETECTOR IMPLEMENTED AND TESTED**
 
-`src/ml/agent1_scorer.py` provides the ML inference entry point for Agent 1.
-`src/ml/feature_mapper.py` provides CanonicalTransaction → IEEE-CIS feature mapping.
+### Phase 4 implementation
 
-The CanonicalTransaction Pydantic schema and adapters (`src/schemas/`) are integrated and verified (Phase 1 prerequisite). The LangGraph node wiring, state graph compilation, and score fusion (`combined_confidence`) are explicitly scheduled for Phase 4 (next week).
+- `src/agents/agent1/anomaly_detector.py` — `AnomalyDetectorAgent` (full processing flow)
+- `src/agents/agent1/output_schema.py` — `Agent1Output` Pydantic schema with validated fields
+- `src/ml/agent1_scorer.py` — lower-level ML scoring integration (preserved)
+- `src/ml/feature_mapper.py` — CanonicalTransaction → IEEE-CIS feature mapping (preserved)
+
+### Agent 1 data flow
+
+```
+CanonicalTransaction
+  → canonical_to_xgb_features()       # feature_mapper.py
+  → FraudPredictor.predict_transaction()  # XGBoost scoring
+  → explain_prediction()               # SHAP per-prediction attributions
+  → AnomalyPredictor.score_transaction()  # Isolation Forest scoring
+  → _compute_combined_confidence()    # documented heuristic fusion
+  → Agent1Output                       # validated Pydantic model
+```
+
+### Score semantics
+
+- `anomaly_score` = XGBoost `fraud_probability` ∈ [0, 1] (supervised probability-like score)
+- `isolation_score` = IF `-score_samples()` ∈ ℝ (higher = more anomalous; NOT a probability)
+- `combined_confidence` = `0.70 × xgb_prob + 0.30 × sigmoid_if` ∈ [0, 1] (heuristic; NOT calibrated probability)
+- `top_deviation_features` = top-N SHAP attributions ranked by absolute value
+
+### LangGraph integration
+
+LangGraph is not yet installed. `AnomalyDetectorAgent` is implemented as a standalone Python callable with explicit input/output contracts, ready for LangGraph node wiring once LangGraph is added to the stack.
 
 ## Datasets and Full-Data Capability
 

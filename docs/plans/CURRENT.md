@@ -11,12 +11,13 @@ Sentinel AI
 - Phase 1 — Canonical Transaction Schema & Data Adapters (INTEGRATED & VERIFIED).
 - Phase 2 — ML Data Pipeline: XGBoost & Isolation Forest (COMPLETE & VERIFIED).
 - Phase 3 — Model Evaluation + Explainability Foundation (COMPLETE & VERIFIED).
+- Phase 4 — Agent 1 Anomaly Detector (COMPLETE & VERIFIED).
 
-**Next Planned Phase**: Phase 4 — Agent 1 Anomaly Detector (LangGraph Node & State Integration) — explicitly scheduled for next week.
+**Next Planned Phase**: Phase 5 — FastAPI ingestion endpoint + Agent 2 (Evidence Gatherer).
 
 ## Current Objective
 
-Phase 3 final wrap-up and verification complete. Repository is fully verified, tested (265/265 tests passing), and ready for Phase 4.
+Phase 4 complete. 319/319 tests passing. Repository is verified and ready for Phase 5.
 
 ## Completed
 
@@ -55,12 +56,25 @@ Phase 3 final wrap-up and verification complete. Repository is fully verified, t
 - **Model Evaluation + Explainability Foundation — IMPLEMENTED AND VERIFIED (Phase 3)**
   - Threshold calibration module with strict test-set isolation (`src/ml/threshold_calibration.py`)
   - XGBoost calibrated threshold=0.80: Precision=0.714, Recall=0.540, F1=0.615, FPR=0.008, Accuracy=0.976
-  - IF calibrated threshold=0.468: F1=0.293, FPR=0.035, FNR=0.667 (unsupervised anomaly caveat preserved)
+  - IF calibrated threshold=0.4679: F1=0.276, FPR=0.036, FNR=0.683 (unsupervised anomaly caveat preserved)
   - Threshold calibration runner script: `scripts/run_threshold_calibration.py`
   - CanonicalTransaction → IEEE-CIS feature mapper (`src/ml/feature_mapper.py`) with support for real canonical schema adapters
   - Agent 1 ML scoring integration (`src/ml/agent1_scorer.py`) with full test coverage (`tests/test_agent1_scorer.py`)
   - 265 total automated tests across schemas and ML components — all passing
   - Documentation: `docs/04_MACHINE_LEARNING/THRESHOLD_CALIBRATION.md`, `docs/04_MACHINE_LEARNING/ML_OVERVIEW.md`
+- **Agent 1 Anomaly Detector — IMPLEMENTED AND VERIFIED (Phase 4)**
+  - `AnomalyDetectorAgent` — full processing flow with structured Pydantic output (`src/agents/agent1/anomaly_detector.py`)
+  - `Agent1Output` — validated Pydantic model with 20+ typed fields, explicit nullability, score ranges (`src/agents/agent1/output_schema.py`)
+  - SHAP per-prediction explanations integrated into agent output (`top_deviation_features`)
+  - `combined_confidence` fusion: weighted average of XGBoost probability (0.70) and sigmoid-normalised IF score (0.30), documented heuristic
+  - Feature mapping limitation documented: 5/432 IEEE-CIS features available from canonical schema; 427 NaN-imputed; `status = COMPATIBILITY_WARNING` always applied
+  - Fail-fast model loading: `FileNotFoundError` propagates on missing artifacts
+  - Graceful runtime inference failures: model errors produce `None` scores, not fabricated values
+  - SHAP failures produce warnings, not crashes
+  - 54 new tests (5 required scenarios + supporting unit tests) — all 319 tests passing
+  - Documentation: `docs/02_AGENTS/AGENT_1_ANOMALY_DETECTOR.md`, `docs/04_MACHINE_LEARNING/ML_OVERVIEW.md` updated
+  - Git branch: `feature/agent1-anomaly-detector`
+  - Git commit: `feat: implement agent 1 anomaly detector`
 
 ## Full-Dataset Evaluation Status and Hardware Limitations
 
@@ -69,27 +83,26 @@ Phase 3 final wrap-up and verification complete. Repository is fully verified, t
 - **System Resource Audit**: 14GB total RAM, 5.2GB available RAM. Merging and preprocessing full 590k x 434 matrix in memory requires >=16GB available RAM. Attempting full training on this host triggers the Linux OOM-killer.
 - **Reproducibility**: Training scripts (`src/ml/trainer.py` and `scripts/train_isolation_forest.py`) support full-dataset training by passing `sample_frac=None` (or omitting the flag) on a host with >=16GB RAM.
 
-## Next Major Milestones (Phase 4 and Beyond)
+## Next Major Milestones (Phase 5 and Beyond)
 
-1. **Phase 4: Agent 1 Anomaly Detector (LangGraph Node)**
-   - Wire `Agent1Scorer` into LangGraph state node
-   - Implement `combined_confidence` fusion strategy
-   - Produce structured output: `anomaly_score`, `isolation_score`, `combined_confidence`, `top_deviation_features`
-   - Normal, suspicious, malformed, missing-feature, and model-unavailable agent tests
-2. Neo4j graph database setup & bulk ingestion (Agent 3)
-3. FastAPI ingestion endpoint
-4. Agent 2 (Evidence Gatherer)
-5. Agent 3 (Network Analyser)
-6. Agent 4 (Risk Assessor)
-7. Agent 5 (Explanation Generator)
-8. Output Validator (deterministic validation layer)
-9. End-to-end multi-agent LangGraph integration
-10. MongoDB persistence
-11. Investigation Dashboard
+1. **Phase 5: FastAPI Ingestion Endpoint**
+   - REST endpoint accepting raw transaction input
+   - Canonical normalization at ingestion
+   - Agent 1 invocation per transaction
+2. **Agent 2 (Evidence Gatherer)**
+3. **Neo4j graph database setup & bulk ingestion (Agent 3)**
+4. **Agent 3 (Network Analyser)**
+5. **Agent 4 (Risk Assessor)**
+6. **Agent 5 (Explanation Generator)**
+7. **Output Validator (deterministic validation layer)**
+8. **LangGraph node wiring for Agent 1** — connect `AnomalyDetectorAgent` to LangGraph state when LangGraph is installed
+9. **End-to-end multi-agent LangGraph integration**
+10. **MongoDB persistence**
+11. **Investigation Dashboard**
 
 ## Current Blockers
 
-None for Phase 2 or Phase 3. Phase 1 canonical schemas have been integrated into `feature/ml-evaluation`. All prerequisites for Phase 4 are satisfied.
+None for Phase 4. All Phase 4 deliverables complete. LangGraph node wiring is explicitly deferred pending LangGraph installation — the agent interface is ready.
 
 ## Important Rule
 
