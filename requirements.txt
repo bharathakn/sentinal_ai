@@ -1,5 +1,5 @@
 # Sentinel AI — Python Dependencies
-# Generated for Phase 5: Mock Evidence Services
+# Updated for Phase 7: Neo4j Graph Infrastructure
 #
 # Install into a virtual environment:
 #   python3 -m venv .venv
@@ -25,6 +25,11 @@ fastapi>=0.100.0
 uvicorn>=0.20.0
 httpx>=0.25.0
 python-dotenv>=1.0.0
+
+# Graph database — Phase 7: Agent 3 Network Analyser infrastructure
+# Supports Neo4j AuraDB (neo4j+s://) and local instances (bolt://, neo4j://).
+# Async driver (AsyncGraphDatabase) is included in the same package.
+neo4j>=5.0.0
 
 # Testing
 pytest>=8.0.0
