@@ -7,9 +7,35 @@ without containing real data.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Live-service configuration
+# ---------------------------------------------------------------------------
+# Live Neo4j integration tests skip unless NEO4J_* variables are present.
+# Load ONLY the NEO4J_* keys from the project .env (never API keys, so the
+# offline unit tests keep using mock providers). Variables already exported
+# in the shell take precedence.
+def _load_neo4j_env() -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return
+    for key, value in dotenv_values(env_path).items():
+        if key.startswith("NEO4J_") and value and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_neo4j_env()
 
 
 # ---------------------------------------------------------------------------

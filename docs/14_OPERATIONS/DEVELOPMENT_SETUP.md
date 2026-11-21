@@ -8,8 +8,8 @@ The project requires:
 
 - Python 3.11+
 - Virtual environment (`.venv`)
-- Git with branch workflow
-- Optional: Neo4j (Agent 3 graph network analysis)
+- Git (work is committed directly on `main`)
+- Docker (local Neo4j for Agent 3)
 - Optional: MongoDB Atlas (case storage)
 - Optional: Groq API key (free tier, for report generation agents)
 
@@ -52,15 +52,34 @@ dataset/
     └── custom_india/           # custom_india_transactions.csv (synthetic data)
 ```
 
-## Running Verification Tests
-
-Run all 265 unit and integration tests:
+## Local Neo4j (Docker)
 
 ```bash
-.venv/bin/python -m pytest tests/ -v
+docker run -d --name sentinel-neo4j --restart unless-stopped \
+  -p 127.0.0.1:7474:7474 -p 127.0.0.1:7687:7687 \
+  -v sentinel_neo4j_data:/data \
+  -e NEO4J_AUTH="neo4j/<choose-a-password>" neo4j:5-community
 ```
 
-All tests execute in ~12 seconds using in-memory synthetic fixtures; raw dataset files are not loaded during test suite execution.
+Set in `.env`: `NEO4J_URI=bolt://localhost:7687`, `NEO4J_USERNAME=neo4j`,
+`NEO4J_PASSWORD=<password>`, `NEO4J_DATABASE=neo4j`. Load the sample graph:
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/load_india_sample_graph.py
+```
+
+Browser UI: http://localhost:7474
+
+## Running Verification Tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+851 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`; the
+29 live Neo4j integration tests skip when those are not set. The Agent 4
+regulatory-excerpt provenance test needs `pdftotext` (poppler-utils) and
+skips without it.
 
 ## Machine Learning Execution Workflows
 

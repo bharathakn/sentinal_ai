@@ -16,14 +16,21 @@ Sentinel AI
 - Phase 6 — Agent 2 Evidence Gatherer: COMPLETE
 - Phase 7 — Neo4j Graph Infrastructure: COMPLETE
 - Phase 8 — Agent 3 Network Analyser: COMPLETE
+- Phase 9 — Agent 4 Risk Assessor: COMPLETE (scoring config + regulatory
+  mappings PROPOSED, pending team approval)
 
-**Next Planned Phase**: Phase 9 — Agent 4 Risk Assessor (aggregate risk scoring
-from Agent 1/2/3 outputs).
+**Next Planned Phase**: Phase 10 — Agent 5 Explanation Generator (Groq LLM
+narrative grounded only in structured Agent 1–4 outputs).
 
 ## Current Objective
 
-Phase 8 complete. 739/739 tests passing (81 unit + 9 live integration for Agent 3;
-full suite Phases 1–8 intact).
+Phase 9 complete. 851/851 tests passing, 0 skipped (live Neo4j integration
+tests now run against the local Docker instance).
+
+Approvals outstanding (human action):
+- Agent 4 weights / bands / overrides (`Agent4Config`, version 0.1.0-proposed).
+- Regulatory mapping entries (all UNVERIFIED). The RBI Fraud Risk Management
+  PDF in the repo carries a "Withdrawn" watermark; confirm the current direction.
 
 ## Completed
 
@@ -68,20 +75,44 @@ full suite Phases 1–8 intact).
   - Branch: `feature/agent3-network-analyser`
   - Commit: `feat: implement agent 3 network analyser`
 
+- **Phase 9**: Agent 4 Risk Assessor.
+  - `RiskAssessorAgent` — deterministic weighted scoring over 7 signals; no LLM.
+  - Unavailable evidence lowers `evidence_coverage`; never scored as safe.
+  - Action bands + overrides (sanctions match → BLOCK; sanctions failure / low
+    coverage → HUMAN_REVIEW); SAR/STR recommendation as system recommendation only.
+  - Regulatory registry: 10 verbatim FATF/RBI references, 18 mappings, all
+    UNVERIFIED; unmapped triggers reported, never invented.
+  - `SentinelState.agent4_output` wired. 112 new tests.
+  - Docs: `docs/02_AGENTS/AGENT_4_RISK_ASSESSOR.md`,
+    `docs/07_RISK_AND_COMPLIANCE/RISK_SCORING.md`, `REGULATORY_MAPPING.md`.
+
+## Environment (2026-11-21)
+
+- Work is committed directly on `main`; feature branches were merged and removed.
+- Neo4j: local Docker container `sentinel-neo4j` (bolt://localhost:7687,
+  volume `sentinel_neo4j_data`). The former AuraDB instance no longer exists.
+  Sample graph: `PYTHONPATH=. python scripts/load_india_sample_graph.py`.
+- `tests/conftest.py` loads only `NEO4J_*` keys from `.env`.
+- MongoDB Atlas: the cluster in `MONGODB_URI` no longer resolves; needs
+  recreating before the persistence phase.
+- Groq and NewsAPI keys verified working.
+
 ## Next Major Milestones
 
-1. **Phase 9: Agent 4 (Risk Assessor)** — aggregate risk scoring from Agent 1/2/3 outputs.
-2. **Phase 10: Agent 5 (Explanation Generator)** — Groq LLM narrative.
-3. **LangGraph installation** — wire agents into `StateGraph(SentinelState)`.
-4. **MongoDB case persistence** — investigation case schema and storage.
-5. **FastAPI ingestion endpoint** — accept raw transaction, run pipeline.
-6. **Investigation Dashboard**.
+1. **Phase 10: Agent 5 (Explanation Generator)** — Groq LLM narrative.
+2. **Phase 11: Output Validator** — deterministic report validation.
+3. **Phase 12: LangGraph orchestration** — `StateGraph(SentinelState)` end to end.
+4. **Phase 13: FastAPI ingestion + MongoDB case persistence / audit trail**.
+5. **Phase 14: Investigation Dashboard** and five-case demonstration.
 
 ## Current Blockers
 
 - LangGraph not installed. `SentinelState` TypedDict is LangGraph-compatible;
   wiring into `StateGraph` deferred until LangGraph is added to the stack.
 - Full-dataset XGBoost training requires ≥16 GB RAM (current host ~14 GB).
+- Agent 1 scores non-IEEE-CIS transactions in CANONICAL_MAPPED mode with most
+  features imputed (COMPATIBILITY_WARNING); its score is near-constant for
+  mock / India-synthetic cases.
 
 ## Important Rule
 

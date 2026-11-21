@@ -1,68 +1,63 @@
-# FILE: docs/plans/ROADMAP.md
-
 # Sentinel AI Roadmap
 
-## Phase 1 — Canonical Transaction Schema & Adapters (COMPLETE & VERIFIED)
+Phase numbering follows `docs/plans/CURRENT.md`.
 
-- Canonical transaction model (`CanonicalTransaction` via Pydantic v2)
-- IEEE-CIS, PaySim, and India Synthetic adapters
-- Unit test suite (82 tests passing)
-- Schema documentation and provenance enforcement
+## Phase 1 — Canonical Transaction Schema & Adapters (COMPLETE)
 
-## Phase 2 — ML Data Pipeline: XGBoost & Isolation Forest (COMPLETE & VERIFIED)
+- `CanonicalTransaction` (Pydantic v2); IEEE-CIS, PaySim, India Synthetic adapters
 
-- Dataset loader & feature engineering pipeline
-- Supervised fraud classifier (XGBoost) with class-imbalance weighting
-- Unsupervised anomaly detector (Isolation Forest)
-- SHAP feature explainability layer
-- Model artifact persistence and prediction consistency tests (117 tests passing)
+## Phase 2 — ML Pipeline: XGBoost & Isolation Forest (COMPLETE)
 
-## Phase 3 — Model Evaluation & Explainability Foundation (COMPLETE & VERIFIED)
+- Loader, preprocessing, XGBoost classifier, Isolation Forest, SHAP
 
-- Evaluator metrics suite (Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC, FPR, FNR, Confusion Matrix)
-- Threshold calibration with strict test-set isolation
-- CanonicalTransaction → model feature mapping (`src/ml/feature_mapper.py`)
-- Standalone Agent 1 ML scoring engine (`src/ml/agent1_scorer.py`)
-- Full-dataset readiness and configuration verification
-- Total automated tests: 265 passing
+## Phase 3 — Model Evaluation & Explainability (COMPLETE)
 
-## Phase 4 — Agent 1 Anomaly Detector (NEXT PLANNED PHASE — NEXT WEEK)
+- Metrics suite, threshold calibration, canonical → feature mapping, Agent 1 scorer
 
-- Agent 1 LangGraph node definition and state integration
-- Score fusion strategy (`combined_confidence`)
-- Structured Agent 1 output (`anomaly_score`, `isolation_score`, `combined_confidence`, `top_deviation_features`)
-- Agent scenario tests (normal, suspicious, malformed, sparse input, model unavailable)
+## Phase 4 — Agent 1 Anomaly Detector (COMPLETE)
 
-## Phase 5 — Evidence Gathering & Connectors (Agent 2)
+- `AnomalyDetectorAgent`, combined_confidence (70/30), SHAP deviation features
 
-- Mock banking APIs (Core Banking, KYC, Device Registry, Beneficiary DB, Geolocation)
-- Public news search integration
-- Evidence provenance and timestamp tracking
+## Phase 5 — Mock Evidence Infrastructure (COMPLETE)
 
-## Phase 6 — Graph Database & Network Analysis (Agent 3)
+- Core banking, KYC, device, beneficiary, sanctions, geolocation, news (mock + NewsAPI)
 
-- Neo4j graph schema setup and transaction ingestion
-- Circular transaction flow and fan-out/fan-in detection
-- Suspicious community and mule account identification
+## Phase 6 — Agent 2 Evidence Gatherer (COMPLETE)
 
-## Phase 7 — Risk Assessment (Agent 4) & Explanation (Agent 5)
+- Concurrent provider gather with provenance; `SentinelState`
 
-- Regulatory rule mapping (RBI, FATF, OFAC, UN sanctions)
-- Weighted multi-dimensional risk scoring
-- LLM grounded narrative explanation via Groq API
+## Phase 7 — Neo4j Graph Infrastructure (COMPLETE)
 
-## Phase 8 — Deterministic Output Validation & Pipeline Wiring
+- Connection managers, schema, idempotent loader, query helper
 
-- Rule-based fact-checking and hallucination prevention (Output Validator)
-- Multi-agent LangGraph orchestration from alert to validated report
+## Phase 8 — Agent 3 Network Analyser (COMPLETE)
 
-## Phase 9 — Storage & Ingestion API
+- Layering, structuring, fan-in, fan-out, mule-like, rapid forwarding, clusters
 
-- FastAPI case ingestion endpoints
-- MongoDB Atlas case and audit log persistence
+## Phase 9 — Agent 4 Risk Assessor (COMPLETE — config & mappings pending approval)
 
-## Phase 10 — Analyst Dashboard & Demonstration
+- Deterministic weighted scoring, action bands and overrides, SAR/STR recommendation
+- Regulatory mapping registry (FATF / RBI, verbatim, UNVERIFIED)
 
-- React compliance analyst interface
-- Network visualization (React Force Graph)
+## Phase 10 — Agent 5 Explanation Generator (NEXT)
+
+- Groq LLM report from structured Agent 1–4 outputs only, following the report template
+- Every factual claim traceable to a structured source field
+
+## Phase 11 — Output Validator
+
+- Deterministic checks of the generated report against source data
+- Failed validation → flagged for human review
+
+## Phase 12 — LangGraph Orchestration
+
+- `StateGraph(SentinelState)` from alert to validated report
+
+## Phase 13 — Ingestion API & Persistence
+
+- FastAPI case ingestion; MongoDB case storage and analyst audit trail
+
+## Phase 14 — Analyst Dashboard & Demonstration
+
+- React analyst interface, network visualisation (React Force Graph)
 - Five-case end-to-end demonstration (2 fraud, 2 legitimate, 1 borderline)
