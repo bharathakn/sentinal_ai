@@ -21,11 +21,19 @@ Sentinel AI
 | 10 — Agent 5 Explanation Generator | COMPLETE |
 | 11 — Output Validator | COMPLETE |
 | 12 — LangGraph orchestration | COMPLETE |
-| **13 — Ingestion API & case store** | **NEXT** |
+| 13 — Ingestion API & case store | COMPLETE |
+| **14 — Analyst dashboard & demonstration** | **NEXT** |
 
 See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
+
+Phase 13 complete: FastAPI investigation API (`src/api/`). Alerts create
+cases, which are investigated on one background worker and stored in a case
+store: JSON files locally, MongoDB Atlas when hosted. Analysts read the
+priority queue, case detail, report and audit trail, and record decisions,
+which are revisable and audited. Verified end to end on AuraDB + Atlas.
+Next: Phase 14, the React analyst dashboard.
 
 Phase 12 complete: the investigation runs as a LangGraph `StateGraph`
 (`src/agents/pipeline_graph.py`). Every node may write only its own typed
@@ -56,6 +64,16 @@ End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
 
 Deployment target (Vercel + Render) recorded in
 `docs/14_OPERATIONS/DEPLOYMENT.md`; deploy-compatibility groundwork is done.
+
+## Phase 13 summary
+
+- Endpoints: `/health`, `POST /api/v1/alerts`, `GET /api/v1/cases[/{id}[/report|/audit]]`,
+  `POST /api/v1/cases/{id}/decision`. Server: `uvicorn src.api.main:app --workers 1`.
+- Case lifecycle RECEIVED → INVESTIGATING → AWAITING_REVIEW → DECIDED
+  (or INVESTIGATION_FAILED); duplicate alerts return the existing case; labels
+  stripped before storage; only exception types stored.
+- `SENTINEL_CASE_STORE=json|mongodb`; `pymongo` added to requirements.
+- Tests: `tests/test_api.py` (store tests also live on Atlas, temporary DB).
 
 ## Phase 12 summary
 
@@ -110,11 +128,10 @@ Deployment target (Vercel + Render) recorded in
 - Neo4j: `.env` now points to the project owner's AuraDB instance
   (changed 2026-11-21), loaded with all 10,000 v2 transactions. The local
   Docker container `sentinel-neo4j` still exists with its own copy of the graph.
-- MongoDB Atlas: new cluster configured and verified 2026-11-21 (ping,
-  write, read, delete; MongoDB 8.0). Network access allows the developer IP
-  only; Render will need `0.0.0.0/0` or equivalent at deployment. Not yet
-  used by code: the case store arrives in Phase 13 (add `pymongo` to
-  requirements then).
+- MongoDB Atlas: verified 2026-11-21 (MongoDB 8.0). Used by the Phase 13
+  case store (`SENTINEL_CASE_STORE=mongodb`, database `sentinel_ai`). Network
+  access allows the developer IP only; Render will need `0.0.0.0/0` or
+  equivalent at deployment.
 - Groq and NewsAPI keys verified working.
 - Rebuild sequence: generate dataset → train India model → load graph
   (see `docs/14_OPERATIONS/DEVELOPMENT_SETUP.md`).
@@ -130,8 +147,8 @@ Deployment target (Vercel + Render) recorded in
 
 - Supply the current RBI direction and PMLA / FIU-IND PDFs to restore India
   mappings.
-- Case store for the hosted deployment (Render disk is ephemeral): MongoDB
-  Atlas, now available (Phase 13).
+- Analyst authentication: the prototype records a self-declared analyst id.
+  Decide whether the demo needs a login (e.g. SSO/OIDC) before deployment.
 
 ## Known limitations
 

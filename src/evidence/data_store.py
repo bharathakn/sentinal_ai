@@ -176,6 +176,18 @@ class IndiaSyntheticStore:
             self._loaded = True
 
     # ------------------------------------------------------------------
+    def get_transaction(self, transaction_id: str) -> Optional[dict[str, Any]]:
+        """One row of transactions_features.csv (no labels: targets are never loaded).
+
+        Used by the API's synthetic monitoring feed to build an alert.
+        """
+        self._load()
+        rows = self._tx.index[self._tx["transaction_id"] == transaction_id]
+        if len(rows) == 0:
+            return None
+        return self._tx.loc[rows[0]].drop(labels=["ts_utc"]).to_dict()
+
+    # ------------------------------------------------------------------
     def _rows_before(self, account_id: str, as_of: Optional[datetime]):
         """Transactions involving account strictly before as_of, oldest→newest."""
         import pandas as pd

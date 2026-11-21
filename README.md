@@ -92,11 +92,11 @@ A deterministic validation layer must check the generated report before it reach
 
 ## Current Status
 
-Phases 1–12 are complete: canonical schema, ML models, Agents 1–5 (anomaly
+Phases 1–13 are complete: canonical schema, ML models, Agents 1–5 (anomaly
 detection, evidence gathering, network analysis, risk assessment, grounded
-report generation), the deterministic Output Validator, and LangGraph
-orchestration of the whole pipeline. Next is Phase 13, the ingestion API and
-case store. The authoritative
+report generation), the deterministic Output Validator, LangGraph
+orchestration, and the FastAPI investigation API with its case store (JSON
+locally, MongoDB Atlas hosted). Next is Phase 14, the analyst dashboard. The authoritative
 status, plan and open decisions live in `docs/plans/CURRENT.md` and
 `docs/plans/ROADMAP.md`.
 

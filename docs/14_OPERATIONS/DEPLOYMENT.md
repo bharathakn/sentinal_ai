@@ -15,7 +15,7 @@ Browser ──► Vercel (React analyst UI, static build)          Phase 14
               ├─► Neo4j AuraDB Free      (graph, neo4j+s://)
               ├─► Groq API               (Agent 5 LLM; server-side key only)
               ├─► NewsAPI                (optional; mock by default)
-              └─► Case store             (decision pending, see below)
+              └─► MongoDB Atlas M0       (case store, SENTINEL_CASE_STORE=mongodb)
 ```
 
 The agents, ML models and LLM calls run only on Render. Vercel serves static
@@ -37,6 +37,12 @@ production differ only in environment variables:
 | `GROQ_API_KEY` | `.env` | Render secret |
 | `GROQ_MODEL` | default `openai/gpt-oss-120b` | same |
 | `SENTINEL_REPORT_GENERATOR` | `llm` | `llm` (template fallback is automatic) |
+| `SENTINEL_CASE_STORE` | `json` | `mongodb` |
+| `MONGODB_URI` | `.env` | Render secret |
+| `MONGODB_DATABASE` | default `sentinel_ai` | same |
+| `SENTINEL_CORS_ORIGINS` | default localhost dev servers | the Vercel origin, e.g. `https://<app>.vercel.app` |
+| `SENTINEL_INGEST_API_KEY` | empty (open) | a random secret if alerts come from a server-side source |
+| `LANGSMITH_TRACING` | `false` | `false` |
 
 The Neo4j driver accepts `bolt://`, `neo4j://` and `neo4j+s://` URIs, so
 switching to AuraDB needs no code change. Credentials are never committed;
@@ -51,7 +57,8 @@ seeded, and rebuilding produces byte-identical CSVs and model files (verified
 
 ```
 Build command:  pip install -r requirements.txt && python scripts/build_artifacts.py
-Start command:  uvicorn <app module, defined in Phase 13> --host 0.0.0.0 --port $PORT
+Start command:  uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1
+Health check:   /health
 ```
 
 The IEEE-CIS models need the 1.8 GB raw Kaggle dataset and are not deployed.
@@ -81,15 +88,19 @@ demo, check that the instance is running.
 
 ## Constraints that later phases must respect
 
-1. **Memory.** One investigation peaks at about 380 MB RSS (measured
-   2026-11-21). Render's free and Starter instances have 512 MB. Load models
-   once per process, not per request. Run one worker, and do not load
-   full-size DataFrames per request.
+1. **Memory.** The API server peaks at about 445 MB RSS after
+   investigations (measured 2026-11-22 against AuraDB and Atlas). Of that,
+   about 240 MB is libraries, 115 MB the Agent 1 models and 25 MB the India
+   store. Render's free and Starter instances have 512 MB, which leaves
+   about 65 MB. Models load once per process, and the API runs one worker.
+   Do not load full-size DataFrames per request. If Render reports
+   out-of-memory restarts, move to the next instance size.
 2. **Ephemeral filesystem.** Render's disk is wiped on every deploy and
-   restart. A local JSON case store loses all cases. Production needs a
-   database (MongoDB Atlas M0) or a paid Render persistent disk. **Decision
-   pending.** MongoDB is deferred by the project owner; the Phase 13 case
-   store sits behind an interface so the adapter can change later.
+   restart, so the JSON case store would lose all cases. **Decided
+   (Phase 13):** MongoDB Atlas, `SENTINEL_CASE_STORE=mongodb`. Atlas Network
+   Access must allow Render's outbound addresses; on the free tier these are
+   not fixed, so use `0.0.0.0/0` with a strong database password. Cases
+   interrupted by a restart are queued again at start-up.
 3. **Cold starts.** Render's free services sleep when idle, and the first
    request takes about a minute. The UI should show a loading state.
 4. **CORS.** The FastAPI app must allow the Vercel origin. Use an env var,

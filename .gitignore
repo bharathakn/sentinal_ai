@@ -65,3 +65,6 @@ Thumbs.db
 
 src/__pycache__/
 src/data/__pycache__/
+
+# Local case store (Phase 13 JSON backend)
+var/

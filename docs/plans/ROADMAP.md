@@ -155,17 +155,22 @@ deterministically and remain an analyst-review item.
   repair a failed report using the validator's issues before falling back to
   the template report.
 
-## Phase 13 — Ingestion API & Case Store (NEXT)
+## Phase 13 — Ingestion API & Case Store (COMPLETE 2026-11-22)
 
-- FastAPI: alert ingestion (case id), case retrieval, analyst decision + audit trail.
-- Case store behind an interface: local JSON store for development; MongoDB
-  Atlas adapter (cluster verified 2026-11-21).
-  Render's filesystem is ephemeral, so the hosted deployment needs the
-  database adapter (or a paid persistent disk).
-- Must fit Render's 512 MB: models loaded once per process, one worker.
-- CORS allow-list from env (Vercel origin); `/health` endpoint.
+- `src/api/`: FastAPI alert ingestion (full transaction, or a synthetic-feed
+  transaction id), case queue in priority order, case detail, report
+  (JSON / Markdown), audit trail, analyst decisions (revisable, all kept).
+- Case store interface: JSON files (development) and MongoDB Atlas (hosted);
+  conditional updates and an append-only audit trail. Both backends pass the
+  same tests, including live tests on Atlas.
+- One in-process investigation worker. Unfinished cases are queued again at
+  restart. Peak memory 445 MB (Render 512 MB).
+- CORS allow-list from env; `/health`; optional ingest API key.
+- Spec: `docs/09_BACKEND/API_DESIGN.md`.
+- Open (project owner): analyst authentication. Identity is self-declared in
+  the prototype.
 
-## Phase 14 — Analyst Dashboard & Demonstration
+## Phase 14 — Analyst Dashboard & Demonstration (NEXT)
 
 - React analyst UI, network visualisation (React Force Graph).
 - Five-case demonstration drawn from labelled India scenarios

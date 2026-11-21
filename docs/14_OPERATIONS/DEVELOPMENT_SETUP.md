@@ -105,14 +105,30 @@ report per 40 s; otherwise the template writer is used.
 
 Browser UI: http://localhost:7474
 
+## Run the API (Phase 13)
+
+```bash
+.venv/bin/uvicorn src.api.main:app --port 8000 --workers 1     # OpenAPI docs: http://localhost:8000/docs
+curl -X POST 'localhost:8000/api/v1/alerts?wait=true' -H 'Content-Type: application/json' \
+     -d '{"transaction_id": "TXN_IND_202608_000977"}'
+curl localhost:8000/api/v1/cases
+```
+
+The API loads `.env` and defaults to the India synthetic evidence backend.
+Cases go to `var/cases/` (`SENTINEL_CASE_STORE=json`), or to MongoDB Atlas
+with `SENTINEL_CASE_STORE=mongodb`. Endpoints and lifecycle:
+`docs/09_BACKEND/API_DESIGN.md`.
+
 ## Running Verification Tests
 
 ```bash
 .venv/bin/python -m pytest tests/ -q
 ```
 
-About 960 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`;
-the 29 live Neo4j integration tests skip when those are not set. The suite
+About 1,050 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`;
+the 29 live Neo4j integration tests skip when those are not set. The case-store
+tests in `tests/test_api.py` also run against MongoDB when `MONGODB_URI` is
+set (only `MONGODB_*` keys are read), in a temporary database that is dropped. The suite
 forces the template report writer (no LLM calls). Set
 `SENTINEL_LIVE_LLM_TESTS=1` to run the single live Groq test. The Agent 4
 regulatory-excerpt provenance test needs `pdftotext` (poppler-utils) and
