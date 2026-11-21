@@ -68,9 +68,10 @@ CanonicalTransaction + Agent1Output
 
 ## LangGraph Integration
 
-LangGraph is not yet installed. `SentinelState` TypedDict in
-`src/agents/sentinel_pipeline.py` is directly compatible with LangGraph's
-state annotation. When installed, wrap agents as graph nodes.
+Runs as the `evidence_gatherer` node of the Phase 12 graph
+(`src/agents/pipeline_graph.py`; `docs/09_BACKEND/LANGGRAPH_PIPELINE.md`).
+The node calls `gather_evidence(transaction, agent1_output)` and writes only
+`agent2_output`.
 
 ## Agent 2 does NOT do
 

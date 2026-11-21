@@ -12,6 +12,11 @@ Agent 2 (Evidence Gatherer) →  reads agent1_output, writes agent2_output
 Agent 3 (Network Analyser)  →  reads agent2_output, writes agent3_output
 Agent 4 (Risk Assessor)     →  reads agent1/2/3 outputs, writes agent4_output
 Agent 5 (Explanation Gen.)  →  reads all outputs, writes agent5_output (draft report)
+Output Validator            →  writes validation_output (may replace agent5_output
+                               with a validated template report; rejected_reports)
+
+Orchestration (Phase 12): `src/agents/pipeline_graph.build_investigation_graph`
+compiles a LangGraph `StateGraph(SentinelState)`; `Investigator` runs it.
 
 Rules
 -----
@@ -19,15 +24,16 @@ Rules
   output field. No agent modifies another agent's output.
 * The `transaction` field is immutable once set by the graph entry point.
 * Optional agent outputs are None until the corresponding agent has run.
-* LangGraph integration: replace `dict` with `StateGraph(SentinelState)` once
-  langgraph is installed. The field names and types are designed for direct
-  compatibility with LangGraph's state annotation conventions.
+* The graph enforces these rules: each node may write only the fields it
+  owns, typed, and appends one record to `pipeline_trace` (a LangGraph
+  append reducer).
 """
 
 from __future__ import annotations
 
+import operator
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 from uuid import uuid4
 
 from typing_extensions import TypedDict
@@ -58,6 +64,11 @@ class SentinelState(TypedDict, total=False):
     validation_output : Output Validator result for the presented report.
     rejected_reports  : Reports generated but not presented (failed
                         validation), kept with their validation for audit.
+    pipeline_trace    : One NodeRecord per executed graph node (appended).
+    halt_reason       : Set when the graph halted before the report (no risk score).
+    pipeline_status   : COMPLETE / DEGRADED / HALTED (set by the final node).
+    pipeline_version  : Version of the orchestration graph.
+    case_completed_at_utc : When the graph finished.
     """
 
     case_id: str
@@ -70,6 +81,11 @@ class SentinelState(TypedDict, total=False):
     agent5_output: Optional[Agent5Output]
     validation_output: Optional[Any]   # validator.ValidationOutput (typed loosely: import order)
     rejected_reports: list[Any]
+    pipeline_trace: Annotated[list[Any], operator.add]   # pipeline_graph.NodeRecord
+    halt_reason: Optional[str]
+    pipeline_status: str
+    pipeline_version: str
+    case_completed_at_utc: datetime
 
 
 # ---------------------------------------------------------------------------

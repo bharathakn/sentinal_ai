@@ -20,11 +20,19 @@ Sentinel AI
 | 9.5 — Investigation data coherence & hardening | COMPLETE |
 | 10 — Agent 5 Explanation Generator | COMPLETE |
 | 11 — Output Validator | COMPLETE |
-| **12 — LangGraph orchestration** | **NEXT** |
+| 12 — LangGraph orchestration | COMPLETE |
+| **13 — Ingestion API & case store** | **NEXT** |
 
 See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
+
+Phase 12 complete: the investigation runs as a LangGraph `StateGraph`
+(`src/agents/pipeline_graph.py`). Every node may write only its own typed
+output and is recorded in `pipeline_trace`. If Agent 4 produces no risk
+score, the case halts for human review without a report. Other node failures
+mark the case `DEGRADED`. Results are identical to the old sequential runner
+(72 cases on AuraDB). Next: Phase 13, ingestion API + MongoDB case store.
 
 Phase 11 complete: every report is checked by a deterministic Output
 Validator (7 checks). Only VALIDATED reports are presented as validated; a
@@ -48,6 +56,17 @@ End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
 
 Deployment target (Vercel + Render) recorded in
 `docs/14_OPERATIONS/DEPLOYMENT.md`; deploy-compatibility groundwork is done.
+
+## Phase 12 summary
+
+- `build_investigation_graph(...)` compiles: anomaly_detector →
+  evidence_gatherer → network_analyser → risk_assessor →
+  (explanation_generator → output_validator | halt_for_review) → finalise.
+- New state fields: `pipeline_trace`, `halt_reason`, `pipeline_status`
+  (COMPLETE / DEGRADED / HALTED), `pipeline_version`, `case_completed_at_utc`.
+- `run_investigation.py` prints the node trace; `langgraph>=1.2.0` added to
+  requirements. LangSmith tracing must stay off (`LANGSMITH_TRACING=false`).
+- Tests: `tests/test_pipeline_graph.py`.
 
 ## Phase 10 summary
 

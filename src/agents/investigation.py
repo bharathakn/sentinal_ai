@@ -1,7 +1,8 @@
 """
-Sentinel AI — Sequential investigation runner (Phase 9.5).
+Sentinel AI — Investigation runner.
 
-Runs the implemented agents in the documented order on one transaction:
+Runs the investigation on one transaction through the LangGraph pipeline
+(Phase 12, ``pipeline_graph.build_investigation_graph``):
 
     new_case_state (case id + label firewall)
       → Agent 1 Anomaly Detector
@@ -10,11 +11,11 @@ Runs the implemented agents in the documented order on one transaction:
       → Agent 4 Risk Assessor
       → Agent 5 Explanation Generator (report; optional)
       → Output Validator (VALIDATED / NEEDS_HUMAN_REVIEW; template fallback)
+      → finalise (pipeline_status COMPLETE / DEGRADED / HALTED)
 
-This is a plain sequential runner so the pipeline can be exercised before
-LangGraph orchestration (Phase 12). Each agent call follows the same
-state-in / state-out contract the LangGraph nodes will use, and agent
-instances (models, Neo4j connection) are created once and reused.
+No risk score from Agent 4 → the report is skipped and the case is HALTED
+for human review. Agent instances (models, Neo4j connection) and the
+compiled graph are created once and reused across cases.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ class Investigator:
         agent5: Any = None,
         generate_report: bool = True,
         validation_stage: Any = None,
+        evidence_gatherer: Any = None,
     ) -> None:
         from .agent1 import AnomalyDetectorAgent
         from .agent3 import NetworkAnalyserAgent
@@ -62,6 +64,11 @@ class Investigator:
             from .validator import ValidationStage
             self.agent5 = agent5 or ExplanationGeneratorAgent()
             self.validation = validation_stage or ValidationStage()
+        from .pipeline_graph import build_investigation_graph
+        self.graph = build_investigation_graph(
+            agent1=self.agent1, agent3=self.agent3, agent4=self.agent4,
+            agent5=self.agent5, validation_stage=self.validation, evidence_gatherer=evidence_gatherer,
+        )
 
     @staticmethod
     def _try_connect():
@@ -81,18 +88,8 @@ class Investigator:
         transaction: CanonicalTransaction,
         case_id: Optional[str] = None,
     ) -> SentinelState:
-        from .agent2.evidence_gatherer import gather_evidence
-
-        state: SentinelState = new_case_state(transaction, case_id=case_id)
-        tx = state["transaction"]  # label-stripped
-        state["agent1_output"] = self.agent1.score(tx)
-        state["agent2_output"] = gather_evidence(tx, state["agent1_output"])
-        state = self.agent3(state)
-        state = self.agent4(state)
-        if self.agent5 is not None:
-            state = self.agent5(state)
-            state = self.validation(state)
-        return state
+        state: SentinelState = new_case_state(transaction, case_id=case_id)  # label firewall
+        return self.graph.invoke(state)
 
     def close(self) -> None:
         if self._owned_mgr is not None:

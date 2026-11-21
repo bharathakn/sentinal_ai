@@ -64,24 +64,33 @@ def main() -> None:
     with Investigator(generate_report=not a.no_report) as inv:
         state = inv.investigate(tx)
 
-    a1, a2, a3, a4 = (state[k] for k in ("agent1_output", "agent2_output", "agent3_output", "agent4_output"))
+    a1, a2, a3, a4 = (state.get(k) for k in ("agent1_output", "agent2_output", "agent3_output", "agent4_output"))
     if a.json:
-        print(a4.model_dump_json(indent=2))
+        print(a4.model_dump_json(indent=2) if a4 is not None else "null")
         return
     print(f"Case {state['case_id']}  transaction {tx.raw_record_id}")
     print(f"  {tx.amount} {tx.currency} {tx.channel} {tx.sender.account_id} -> {tx.receiver.account_id} at {tx.timestamp}")
-    print(f"Agent 1  {a1.status.value:22} combined_confidence={a1.combined_confidence}")
-    print(f"Agent 2  {a2.status.value:22} failed={a2.failed_providers}")
-    print(f"Agent 3  {a3.status.value:22} findings={[f.pattern_type.value for f in a3.findings]}")
-    print(f"Agent 4  {a4.status.value:22} score={a4.risk_score} action={a4.recommended_action.value} "
-          f"confidence={a4.confidence.value} SAR={a4.sar_recommendation.recommended}")
-    for b in a4.score_breakdown:
-        v = "n/a" if b.value is None else f"{b.value:.2f}"
-        print(f"    {b.signal.value:17} w={b.weight:.2f} v={v:>5}  {b.rationale[:90]}")
-    if a4.overrides_applied:
-        print("  overrides:", [o.rule_id for o in a4.overrides_applied])
-    print("  regulatory:", sorted({m.reference_id for m in a4.regulatory_matches}))
-    print("  unmapped:", [u.value for u in a4.unmapped_triggers])
+    print(f"Pipeline {state.get('pipeline_status')} (graph {state.get('pipeline_version')})"
+          + (f"  halted: {state['halt_reason']}" if state.get("halt_reason") else ""))
+    for r in state.get("pipeline_trace") or []:
+        print(f"    {r.node.value:22} {r.outcome.value:5} {r.output_status or '':20} {r.duration_ms:>9.1f} ms"
+              + (f"  {r.error}" if r.error else ""))
+    print(f"Agent 1  {a1.status.value:22} combined_confidence={a1.combined_confidence}" if a1 else "Agent 1  NO OUTPUT")
+    print(f"Agent 2  {a2.status.value:22} failed={a2.failed_providers}" if a2 else "Agent 2  NO OUTPUT")
+    print(f"Agent 3  {a3.status.value:22} findings={[f.pattern_type.value for f in a3.findings]}" if a3
+          else "Agent 3  NO OUTPUT")
+    if a4 is None:
+        print("Agent 4  NO OUTPUT")
+    else:
+        print(f"Agent 4  {a4.status.value:22} score={a4.risk_score} action={a4.recommended_action.value} "
+              f"confidence={a4.confidence.value} SAR={a4.sar_recommendation.recommended}")
+        for b in a4.score_breakdown:
+            v = "n/a" if b.value is None else f"{b.value:.2f}"
+            print(f"    {b.signal.value:17} w={b.weight:.2f} v={v:>5}  {b.rationale[:90]}")
+        if a4.overrides_applied:
+            print("  overrides:", [o.rule_id for o in a4.overrides_applied])
+        print("  regulatory:", sorted({m.reference_id for m in a4.regulatory_matches}))
+        print("  unmapped:", [u.value for u in a4.unmapped_triggers])
     a5 = state.get("agent5_output")
     if a5 is not None:
         from src.agents.agent5 import render_markdown

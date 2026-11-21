@@ -31,6 +31,11 @@ python-dotenv>=1.0.0
 # Async driver (AsyncGraphDatabase) is included in the same package.
 neo4j>=5.0.0
 
+# Orchestration — Phase 12: LangGraph investigation pipeline
+# (pulls in langsmith; tracing stays OFF unless LANGSMITH_TRACING=true, which
+# would send case data to an external service — keep it off)
+langgraph>=1.2.0
+
 # Testing
 pytest>=8.0.0
 pytest-cov>=5.0.0

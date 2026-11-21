@@ -22,9 +22,9 @@ Determine how abnormal a financial transaction is relative to expected customer 
   - `combined_confidence` fusion strategy implemented and documented
   - SHAP per-prediction explanations integrated
   - Structured `top_deviation_features` output
-- **LangGraph Node Wiring — PENDING**:
-  - LangGraph is not yet installed in the project stack.
-  - `AnomalyDetectorAgent` has explicit input/output contracts ready for wiring.
+- **LangGraph Node Wiring — COMPLETE (Phase 12)**:
+  - Runs as the `anomaly_detector` node (`src/agents/pipeline_graph.py`);
+    see `docs/09_BACKEND/LANGGRAPH_PIPELINE.md`.
 
 ---
 

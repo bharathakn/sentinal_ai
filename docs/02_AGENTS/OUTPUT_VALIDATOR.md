@@ -69,7 +69,8 @@ are written to be explicit, and the report is always reviewed by a human.
 
 ## Pipeline stage and fallback policy (`ValidationStage`)
 
-Runs after Agent 5, both in `Investigator` and in the future LangGraph graph.
+Runs as the `output_validator` node of the LangGraph pipeline, directly after Agent 5
+(`docs/09_BACKEND/LANGGRAPH_PIPELINE.md`).
 
 1. Validate the presented report. Set `state["validation_output"]` and the
    report's `validation_status`.

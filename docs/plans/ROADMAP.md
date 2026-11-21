@@ -139,21 +139,27 @@ its check results for audit. Meaning-level misreadings (e.g. "average debit"
 described as the average of all transactions) cannot be detected
 deterministically and remain an analyst-review item.
 
-## Phase 12 — LangGraph Orchestration (NEXT)
+## Phase 12 — LangGraph Orchestration (COMPLETE 2026-11-22)
 
-- `StateGraph(SentinelState)`: Agents 1–5 → Output Validator, with error edges.
-  The nodes already exist as state-in / state-out callables
-  (`Investigator` runs them sequentially).
-- `run_investigation.py` switches to the graph.
-- Backlog from Phase 11: on a paid LLM tier, ask the LLM once to repair a
-  failed report using the validator's issues before falling back to the
-  template report.
+- `src/agents/pipeline_graph.py`: `StateGraph(SentinelState)`, Agents 1–5 →
+  Output Validator → finalise. `Investigator` (and so `run_investigation.py`
+  and `evaluate_pipeline.py`) runs the compiled graph.
+- Node wrapper enforces the handoffs: owned fields only, typed outputs,
+  exceptions recorded in `pipeline_trace` (type only).
+- Error edge: no risk score from Agent 4 → `halt_for_review` (no report,
+  `HALTED`). Other node failures → `DEGRADED`, and downstream agents treat the
+  missing output as unavailable.
+- Equivalence: 72 cases on AuraDB give identical results to the sequential
+  runner. Spec: `docs/09_BACKEND/LANGGRAPH_PIPELINE.md`.
+- Backlog from Phase 11 (still open): on a paid LLM tier, ask the LLM once to
+  repair a failed report using the validator's issues before falling back to
+  the template report.
 
-## Phase 13 — Ingestion API & Case Store
+## Phase 13 — Ingestion API & Case Store (NEXT)
 
 - FastAPI: alert ingestion (case id), case retrieval, analyst decision + audit trail.
 - Case store behind an interface: local JSON store for development; MongoDB
-  Atlas adapter once the cluster is restored (deferred by the project owner).
+  Atlas adapter (cluster verified 2026-11-21).
   Render's filesystem is ephemeral, so the hosted deployment needs the
   database adapter (or a paid persistent disk).
 - Must fit Render's 512 MB: models loaded once per process, one worker.
