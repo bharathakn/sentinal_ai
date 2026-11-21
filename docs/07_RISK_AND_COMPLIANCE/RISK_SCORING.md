@@ -8,10 +8,11 @@ Combine investigation signals into a final risk score. Implemented by Agent 4
 
 ## Approval status
 
-**PROPOSED — pending project team approval** (`config_version 0.1.0-proposed`,
-written 2026-11-21). These are engineering defaults for a synthetic prototype,
-not regulatory thresholds. Every assessment records the version and approval
-status it was produced with.
+**APPROVED 2026-11-21** (`config_version 1.0.0`; decision delegated by the
+project owner). Calibrated on SYNTHETIC data; these are prototype policy
+values, not regulatory thresholds, and must be re-approved before use on real
+data. Every assessment records the version and approval status it was
+produced with. 1.0.0 = 0.1.0-proposed weights and bands + `OVR-HIGH-ANOMALY`.
 
 ## Weights
 
@@ -55,7 +56,16 @@ ESCALATE < BLOCK).
 |---|---|---|
 | OVR-SANCTIONS-MATCH | any sanctions screen MATCH_FOUND | BLOCK |
 | OVR-SANCTIONS-UNAVAILABLE | an attempted screen failed (provider/auth error) or no screen completed | HUMAN_REVIEW |
+| OVR-HIGH-ANOMALY | ANOMALY signal ≥ 0.70 (`high_anomaly_review_threshold`) | HUMAN_REVIEW |
 | OVR-LOW-COVERAGE | evidence_coverage < 0.60 | HUMAN_REVIEW |
+
+**Why OVR-HIGH-ANOMALY.** Under 0.1.0, a payment 8–15× the customer's normal
+amount to an established payee only fired ANOMALY (weight 0.30), so it could
+never leave MONITOR. A model score alone is not grounds for escalation or a
+SAR, but a strong one must reach an analyst. The rule sends it to
+HUMAN_REVIEW (below ESCALATE, so no SAR). Threshold chosen from the Phase 9.5
+evaluation: ANOMALY ≥ 0.70 in 96% of high-value spikes and 0.3% of legitimate
+transactions (legitimate 99th percentile 0.43).
 
 A screen not attempted because the identifier was missing (Agent 2
 `VALIDATION_ERROR`) is reported as a warning, not a failure, as long as the
@@ -92,33 +102,35 @@ requiring qualified human review, never a filing.
   beneficiary risk (prior fraud flag → 1.0; account younger than 30 days →
   0.5). The beneficiary's own transaction count is not used.
 
-## Evaluation (Phase 9.5, proposed config 0.1.0)
+## Evaluation (Phase 9.5, config 1.0.0)
 
 `scripts/evaluate_pipeline.py` ran Agents 1–4 on 575 labelled India v2
 transactions (300 legitimate + 25 per suspicious scenario). Labels were joined
 only after the agents ran. All 1,725 upstream agent runs were COMPLETE.
 
-| Dataset label | CLEAR | MONITOR | ESCALATE | BLOCK |
-|---|---|---|---|---|
-| LEGITIMATE (300) | 86.7% | 13.3% | 0.0% | 0.0% |
-| FRAUDULENT (194) | 3.1% | 13.9% | 81.4% | 1.5% |
-| BORDERLINE (81) | 19.8% | 45.7% | 34.6% | 0.0% |
+| Dataset label | CLEAR | MONITOR | HUMAN_REVIEW | ESCALATE | BLOCK |
+|---|---|---|---|---|---|
+| LEGITIMATE (300) | 86.7% | 13.0% | 0.3% | 0.0% | 0.0% |
+| FRAUDULENT (194) | 0.0% | 5.7% | 11.3% | 81.4% | 1.5% |
+| BORDERLINE (81) | 8.6% | 25.9% | 30.9% | 34.6% | 0.0% |
 
-| Scenario | Mean score | ESCALATE/BLOCK |
-|---|---|---|
-| Normal | 13.2 | 0% |
-| High-value spike | 27.9 | **0%** |
-| Borderline travel | 34.1 | 20% |
-| Impossible travel / New beneficiary large | ~51 | 60% |
-| Mule / Ring | 54–56 | 84% |
-| Rapid burst / Structuring / Layering / New device / Shared device | 60–64 | 76–100% |
+(0.1.0 for comparison: FRAUDULENT 3.1% CLEAR / 13.9% MONITOR; no HUMAN_REVIEW.)
 
-Observations for the approval decision:
+| Scenario | Mean score | HUMAN_REVIEW | ESCALATE/BLOCK |
+|---|---|---|---|
+| Normal | 13.2 | 0% | 0% |
+| High-value spike | 27.9 | **96%** | 0% |
+| Borderline travel | 34.1 | 28% | 20% |
+| Impossible travel / New beneficiary large | ~51 | 20–32% | 60% |
+| Mule / Ring | 54–56 | 0% | 84% |
+| Rapid burst / Structuring / Layering / New device / Shared device | 60–64 | 0–8% | 76–100% |
 
-1. No legitimate case reached ESCALATE or BLOCK; 13% reached MONITOR.
-2. **High-value spikes never escalate.** Only ANOMALY fires (weight 0.30), so
-   the score is capped near 30. Whether an 8–15× spike to an established payee
-   should escalate on its own is a policy decision.
+Observations:
+
+1. No legitimate case reached ESCALATE or BLOCK (no SAR); 1 of 300 reached
+   HUMAN_REVIEW via OVR-HIGH-ANOMALY.
+2. No fraudulent case is CLEARed; high-value spikes reach an analyst but do
+   not produce a SAR recommendation on the model score alone.
 3. BLOCK is reached only via score ≥ 75 or a sanctions match; the India
    dataset contains no sanctions matches.
 4. Results are on SYNTHETIC data and are not real-world performance.

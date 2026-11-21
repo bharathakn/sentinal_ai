@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -192,6 +193,7 @@ class AnomalyDetectorAgent:
         top_n_shap: int = 10,
         india_model_dir: Optional[str] = None,
         use_india_model: bool = True,
+        require_ieee_models: Optional[bool] = None,
     ) -> None:
         # Validate weights
         if not math.isclose(xgb_weight + if_weight, 1.0, rel_tol=1e-6):
@@ -213,13 +215,26 @@ class AnomalyDetectorAgent:
             xgb_init_kwargs["model_dir"] = xgb_model_dir
         if xgb_version is not None:
             xgb_init_kwargs["version"] = xgb_version
-        # Raises FileNotFoundError with a clear message if artifacts are missing.
-        self._xgb_predictor = FraudPredictor(**xgb_init_kwargs)
+        # Raises FileNotFoundError with a clear message if artifacts are missing,
+        # unless IEEE-CIS models are optional (hosted deployments serve only
+        # India transactions; set SENTINEL_REQUIRE_IEEE_MODELS=false).
+        if require_ieee_models is None:
+            require_ieee_models = os.environ.get(
+                "SENTINEL_REQUIRE_IEEE_MODELS", "true"
+            ).strip().lower() not in ("0", "false", "no")
+        self._require_ieee_models = require_ieee_models
         self._xgb_threshold = xgb_threshold  # None → uses saved default
-        logger.info(
-            "AnomalyDetectorAgent: XGBoost loaded (version=%s).",
-            self._xgb_predictor.metadata.get("model_version"),
-        )
+        try:
+            self._xgb_predictor = FraudPredictor(**xgb_init_kwargs)
+            logger.info(
+                "AnomalyDetectorAgent: XGBoost loaded (version=%s).",
+                self._xgb_predictor.metadata.get("model_version"),
+            )
+        except FileNotFoundError as exc:
+            if require_ieee_models:
+                raise
+            self._xgb_load_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("IEEE-CIS XGBoost model not loaded (optional): %s", exc)
 
         # --- Load Isolation Forest predictor ---
         # Same fail-fast policy as XGBoost: FileNotFoundError propagates.
@@ -232,13 +247,18 @@ class AnomalyDetectorAgent:
             if_init_kwargs["version"] = if_version
         if if_preprocessor_path is not None:
             if_init_kwargs["preprocessor_path"] = if_preprocessor_path
-        # Raises FileNotFoundError with a clear message if artifacts are missing.
-        self._if_predictor = AnomalyPredictor(**if_init_kwargs)
         self._if_threshold = if_threshold  # None → uses saved default
-        logger.info(
-            "AnomalyDetectorAgent: Isolation Forest loaded (version=%s).",
-            self._if_predictor.metadata.get("model_version"),
-        )
+        try:
+            self._if_predictor = AnomalyPredictor(**if_init_kwargs)
+            logger.info(
+                "AnomalyDetectorAgent: Isolation Forest loaded (version=%s).",
+                self._if_predictor.metadata.get("model_version"),
+            )
+        except FileNotFoundError as exc:
+            if require_ieee_models:
+                raise
+            self._if_load_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("IEEE-CIS Isolation Forest model not loaded (optional): %s", exc)
 
         # --- Optional India-native behavioural model (Phase 9.5) ---
         # Missing artifacts are NOT fatal: India transactions then fall back
@@ -257,8 +277,8 @@ class AnomalyDetectorAgent:
 
         logger.info(
             "AnomalyDetectorAgent initialised. XGBoost version=%s, IF version=%s.",
-            self._xgb_predictor.metadata.get("model_version"),
-            self._if_predictor.metadata.get("model_version"),
+            self._xgb_predictor.metadata.get("model_version") if self._xgb_predictor else None,
+            self._if_predictor.metadata.get("model_version") if self._if_predictor else None,
         )
 
     # ------------------------------------------------------------------

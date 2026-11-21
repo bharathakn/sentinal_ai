@@ -168,9 +168,9 @@ Scores are genuine model outputs and are not fabricated. The limitation is expli
 | Missing optional fields (e.g. no email domain) | Scored; those features NaN-imputed |
 | Empty `raw_record_id` | Pydantic raises `ValidationError` before scoring |
 | Negative amount | Pydantic raises `ValidationError` before scoring |
-| Missing XGBoost artifact | `FileNotFoundError` raised at `AnomalyDetectorAgent.__init__` |
+| Missing XGBoost artifact | `FileNotFoundError` raised at `AnomalyDetectorAgent.__init__`, unless `require_ieee_models=False` / `SENTINEL_REQUIRE_IEEE_MODELS=false` (hosted deployments): then the model is skipped and IEEE-CIS scoring returns a structured `FAILED` output |
 | XGBoost inference failure | `anomaly_score = None`, error logged, status FAILED or PARTIAL |
-| Missing IF artifact | `FileNotFoundError` raised at `AnomalyDetectorAgent.__init__` |
+| Missing IF artifact | Same as XGBoost |
 | IF inference failure | `isolation_score = None`, error logged |
 | SHAP failure | Warning logged; `shap_available = False`; `top_deviation_features = []` |
 | Both models fail | `status = FAILED`; both scores `None`; `combined_confidence = None` |

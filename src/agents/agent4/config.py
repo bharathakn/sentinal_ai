@@ -32,7 +32,7 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Optional
 
 
 class RiskSignal(str, Enum):
@@ -142,6 +142,14 @@ class Agent4Config:
         to at least HUMAN_REVIEW (a sanctions failure is not a clean result).
         Default: True.
 
+    high_anomaly_review_threshold:
+        When the ANOMALY signal is at or above this value, the action is
+        raised to at least HUMAN_REVIEW (OVR-HIGH-ANOMALY). A model score on
+        its own is not grounds for escalation or a SAR, but a strong one must
+        not be left at MONITOR. ``None`` disables the rule. Default: 0.70
+        (Phase 9.5 evaluation: 96% of high-value spikes, 0.3% of legitimate
+        transactions).
+
     sar_min_action:
         A SAR/STR recommendation is produced when the final action is at
         least this severe. Default: ESCALATE.
@@ -186,6 +194,7 @@ class Agent4Config:
     min_evidence_coverage: float = 0.60
     sanctions_match_forces_block: bool = True
     sanctions_unavailable_forces_review: bool = True
+    high_anomaly_review_threshold: Optional[float] = 0.70
     sar_min_action: RecommendedAction = RecommendedAction.ESCALATE
     night_start_hour: int = 23
     night_end_hour: int = 6
@@ -194,8 +203,11 @@ class Agent4Config:
     network_finding_default_score: float = 0.5
     trigger_threshold: float = 0.5
     high_confidence_coverage: float = 0.90
-    config_version: str = "0.1.0-proposed"
-    approval_status: str = "PROPOSED — pending project team approval"
+    config_version: str = "1.0.0"
+    approval_status: str = (
+        "APPROVED 2026-11-21 (decision delegated by the project owner) — "
+        "prototype policy calibrated on SYNTHETIC data; re-approve before use on real data"
+    )
 
     def __post_init__(self) -> None:
         # Freeze a caller-supplied dict so the config stays immutable.
@@ -238,6 +250,10 @@ class Agent4Config:
                      "high_confidence_coverage"):
             if not (0.0 <= getattr(self, name) <= 1.0):
                 raise ValueError(f"{name} must be in [0, 1]")
+        if self.high_anomaly_review_threshold is not None and not (
+            0.0 <= self.high_anomaly_review_threshold <= 1.0
+        ):
+            raise ValueError("high_anomaly_review_threshold must be in [0, 1] or None")
         if self.high_confidence_coverage < self.min_evidence_coverage:
             raise ValueError("high_confidence_coverage must be >= min_evidence_coverage")
 
@@ -274,6 +290,7 @@ class Agent4Config:
             "min_evidence_coverage": self.min_evidence_coverage,
             "sanctions_match_forces_block": self.sanctions_match_forces_block,
             "sanctions_unavailable_forces_review": self.sanctions_unavailable_forces_review,
+            "high_anomaly_review_threshold": self.high_anomaly_review_threshold,
             "sar_min_action": self.sar_min_action.value,
             "night_start_hour": self.night_start_hour,
             "night_end_hour": self.night_end_hour,

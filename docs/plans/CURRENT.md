@@ -16,7 +16,7 @@ Sentinel AI
 | 6 — Agent 2 Evidence Gatherer | COMPLETE |
 | 7 — Neo4j graph infrastructure | COMPLETE |
 | 8 — Agent 3 Network Analyser | COMPLETE (rules superseded by v2 in 9.5) |
-| 9 — Agent 4 Risk Assessor | COMPLETE (config + mappings PROPOSED, pending approval) |
+| 9 — Agent 4 Risk Assessor | COMPLETE (config + mapping 1.0.0 approved) |
 | 9.5 — Investigation data coherence & hardening | COMPLETE |
 | **10 — Agent 5 Explanation Generator** | **NEXT** |
 
@@ -25,12 +25,15 @@ See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 ## Current Objective
 
 Phase 9.5 complete: every agent now works on one coherent investigation world
-(India synthetic dataset v2). 897/897 tests passing, 0 skipped (live Neo4j
+(India synthetic dataset v2). 907/907 tests passing, 0 skipped (live Neo4j
 tests run against the local Docker instance).
 
-End-to-end (Agents 1–4, 575 labelled cases, proposed config): legitimate →
-0% ESCALATE/BLOCK; fraudulent → 83% ESCALATE/BLOCK. Details in
-`docs/07_RISK_AND_COMPLIANCE/RISK_SCORING.md`.
+End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
+0% ESCALATE/BLOCK (0.3% HUMAN_REVIEW); fraudulent → 83% ESCALATE/BLOCK and
+0% CLEAR. Details in `docs/07_RISK_AND_COMPLIANCE/RISK_SCORING.md`.
+
+Deployment target (Vercel + Render) recorded in
+`docs/14_OPERATIONS/DEPLOYMENT.md`; deploy-compatibility groundwork is done.
 
 ## Phase 9.5 summary
 
@@ -64,14 +67,19 @@ End-to-end (Agents 1–4, 575 labelled cases, proposed config): legitimate →
 - Rebuild sequence: generate dataset → train India model → load graph
   (see `docs/14_OPERATIONS/DEVELOPMENT_SETUP.md`).
 
-## Decisions outstanding (project owner)
+## Decisions (2026-11-21, delegated by the project owner)
 
-1. Approve or change Agent 4 weights / bands / overrides
-   (`config_version 0.1.0-proposed`). Notably: should a high-value spike alone
-   escalate?
-2. Verify the regulatory mappings (all UNVERIFIED). The RBI Fraud Risk
-   Management PDF carries a "Withdrawn" watermark; supply the current direction
-   and PMLA / FIU-IND sources if they should be mapped.
+1. Agent 4 config 1.0.0: weights/bands kept; OVR-HIGH-ANOMALY added
+   (ANOMALY ≥ 0.70 → HUMAN_REVIEW, no SAR).
+2. Regulatory mapping 1.0.0: withdrawn RBI references inactive; FATF active
+   (UNVERIFIED).
+
+## Open items (project owner)
+
+- Supply the current RBI direction and PMLA / FIU-IND PDFs to restore India
+  mappings.
+- Case store for the hosted deployment (Render disk is ephemeral): MongoDB
+  Atlas when un-deferred.
 
 ## Known limitations
 

@@ -17,6 +17,7 @@ Algorithm
 4. Overrides raise the action to a minimum severity:
      OVR-SANCTIONS-MATCH        → BLOCK         (sanctions MATCH_FOUND)
      OVR-SANCTIONS-UNAVAILABLE  → HUMAN_REVIEW  (screen failed / not completed)
+     OVR-HIGH-ANOMALY           → HUMAN_REVIEW  (ANOMALY ≥ high_anomaly_review_threshold)
      OVR-LOW-COVERAGE           → HUMAN_REVIEW  (coverage < min_evidence_coverage)
    recommended_action = most severe of band action and all overrides.
 5. SAR/STR recommended when recommended_action ≥ sar_min_action.
@@ -219,6 +220,15 @@ class RiskAssessorAgent:
             overrides.append(AppliedOverride(
                 rule_id="OVR-SANCTIONS-UNAVAILABLE",
                 description="Sanctions screening failed or did not complete; a failed screen is not a clean result.",
+                minimum_action=RecommendedAction.HUMAN_REVIEW))
+        anomaly = results[RiskSignal.ANOMALY]
+        if (cfg.high_anomaly_review_threshold is not None and anomaly.available
+                and anomaly.value >= cfg.high_anomaly_review_threshold):
+            overrides.append(AppliedOverride(
+                rule_id="OVR-HIGH-ANOMALY",
+                description=(f"ML anomaly signal {anomaly.value:.2f} at or above "
+                             f"{cfg.high_anomaly_review_threshold:.2f}; a strong model score "
+                             "requires analyst review (not by itself grounds for a SAR)."),
                 minimum_action=RecommendedAction.HUMAN_REVIEW))
         if coverage < cfg.min_evidence_coverage:
             overrides.append(AppliedOverride(

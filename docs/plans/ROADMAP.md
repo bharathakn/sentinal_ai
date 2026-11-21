@@ -15,7 +15,7 @@ full project review (see "Why the plan changed").
 | 6 | Agent 2 Evidence Gatherer |
 | 7 | Neo4j graph infrastructure |
 | 8 | Agent 3 Network Analyser |
-| 9 | Agent 4 Risk Assessor (config + mappings pending approval) |
+| 9 | Agent 4 Risk Assessor (config + mapping 1.0.0 approved 2026-11-21) |
 | 9.5 | Investigation data coherence & hardening (see below) |
 
 ## Why the plan changed
@@ -102,6 +102,10 @@ Result `VALIDATED` or `NEEDS_HUMAN_REVIEW`, with per-check results.
 - FastAPI: alert ingestion (case id), case retrieval, analyst decision + audit trail.
 - Case store behind an interface: local JSON store for development; MongoDB
   Atlas adapter once the cluster is restored (deferred by the project owner).
+  Render's filesystem is ephemeral, so the hosted deployment needs the
+  database adapter (or a paid persistent disk).
+- Must fit Render's 512 MB: models loaded once per process, one worker.
+- CORS allow-list from env (Vercel origin); `/health` endpoint.
 
 ## Phase 14 — Analyst Dashboard & Demonstration
 
@@ -109,11 +113,33 @@ Result `VALIDATED` or `NEEDS_HUMAN_REVIEW`, with per-check results.
 - Five-case demonstration drawn from labelled India scenarios
   (2 fraudulent, 2 legitimate, 1 borderline).
 
+## Phase 15 — Deployment (Vercel + Render)
+
+Design and constraints: `docs/14_OPERATIONS/DEPLOYMENT.md`.
+- Render web service: build = `pip install -r requirements.txt && python scripts/build_artifacts.py`.
+- Neo4j AuraDB Free (graph loaded once from a developer machine).
+- Vercel static frontend; API base URL via env; no secrets on Vercel.
+- Case store database (MongoDB Atlas M0 recommended).
+
+Already in place (2026-11-21): env-only configuration, `neo4j+s://` support,
+reproducible artifact build (`scripts/build_artifacts.py`), Agent 1 runs
+without IEEE-CIS models (`SENTINEL_REQUIRE_IEEE_MODELS=false`),
+`.python-version`.
+
+## Decisions taken 2026-11-21 (delegated by the project owner)
+
+- Agent 4 config 1.0.0 approved for the synthetic prototype. Weights and bands
+  unchanged; added OVR-HIGH-ANOMALY (ANOMALY ≥ 0.70 → HUMAN_REVIEW, no SAR)
+  so high-value spikes reach an analyst.
+- Regulatory mapping 1.0.0: RBI references from the withdrawn PDF are
+  SOURCE_WITHDRAWN and are never attached to a case. FATF references stay
+  active and are labelled UNVERIFIED.
+
 ## Backlog / decisions outstanding
 
-- Approve Agent 4 weights, bands, overrides (`config_version 0.1.0-proposed`).
-- Verify regulatory mappings; replace the withdrawn RBI direction; add
-  PMLA / FIU-IND sources.
+- Add the current RBI direction and PMLA / FIU-IND sources (PDFs) so India
+  mappings can be restored; qualified review of FATF mappings.
+- Re-approve Agent 4 configuration before any use on real data.
 - Screening against the real OFAC SDN / UN consolidated list snapshots already
   in `dataset/raw/sanctions/` (currently only a synthetic watchlist is used).
 - Full-dataset IEEE-CIS retraining on a host with ≥16 GB free RAM.

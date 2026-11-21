@@ -2,8 +2,9 @@
 
 ## Status
 
-IMPLEMENTED (Phase 9). Scoring configuration and regulatory mappings are
-**PROPOSED — pending project team approval** (see "Approval status" below).
+IMPLEMENTED (Phase 9). Scoring configuration `1.0.0` and regulatory mapping
+`1.0.0` approved 2026-11-21 for the synthetic prototype (see "Approval
+status" below).
 
 ## Purpose
 
@@ -90,12 +91,16 @@ recommendation. They are resolved **only** against
 
 ## Approval status
 
-The project plan referenced a weighted model but no weights were recorded in
-the repository. The Phase 9 values are proposed defaults; every output is
-stamped `config_version = 0.1.0-proposed` and
-`config_approval_status = PROPOSED — pending project team approval`. Once the
-team approves (or changes) the values, update `Agent4Config`, bump
-`config_version`, set the approval status, and record the change here.
+| Version | Date | Change |
+|---|---|---|
+| 0.1.0-proposed | 2026-11-21 | Phase 9 engineering defaults |
+| 1.0.0 | 2026-11-21 | Approved (decision delegated by the project owner). Weights and bands unchanged. Added `OVR-HIGH-ANOMALY` (ANOMALY ≥ 0.70 → at least HUMAN_REVIEW) because high-value spikes never left MONITOR. |
+
+Every output is stamped with `config_version` and `config_approval_status`.
+The approval covers the synthetic prototype only; the configuration must be
+re-approved before use on real data. To change it: update `Agent4Config`,
+bump `config_version`, record the evaluation that justified it here and in
+`RISK_SCORING.md`.
 
 ## Important Rules
 

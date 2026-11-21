@@ -66,6 +66,9 @@ Set in `.env`: `NEO4J_URI=bolt://localhost:7687`, `NEO4J_USERNAME=neo4j`,
 
 ## Rebuild the India investigation world
 
+Steps 1–2 in one idempotent command (also the Render build step; see
+`DEPLOYMENT.md`): `PYTHONPATH=. .venv/bin/python scripts/build_artifacts.py [--force]`.
+
 ```bash
 # 1. Generate the India synthetic dataset v2 (validated; ~2 s)
 PYTHONPATH=. .venv/bin/python scripts/generate_synthetic_dataset.py
@@ -95,7 +98,7 @@ Browser UI: http://localhost:7474
 .venv/bin/python -m pytest tests/ -q
 ```
 
-897 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`; the
+907 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`; the
 29 live Neo4j integration tests skip when those are not set. The Agent 4
 regulatory-excerpt provenance test needs `pdftotext` (poppler-utils) and
 skips without it.

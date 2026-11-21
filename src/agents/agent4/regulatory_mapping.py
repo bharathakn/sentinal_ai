@@ -14,10 +14,16 @@ All entries are `UNVERIFIED`: a qualified human must confirm the section,
 wording and applicability before any entry is presented as a verified
 regulatory mapping, and record the review per REGULATORY_SOURCE_CONTROL.md §9.
 
+ACTIVE vs INACTIVE (mapping 1.0.0, 2026-11-21)
+* Only references whose source is current are ACTIVE and can be attached to
+  a case. The RBI Master Directions PDF in the repository (RBI/DOS/2024-25/118,
+  15 Jul 2024) carries a "Withdrawn" watermark on every page, so its entries
+  are SOURCE_WITHDRAWN: kept for traceability, never attached to a case.
+  Replace them when the current RBI direction is added to the repository.
+* FATF entries remain UNVERIFIED (excerpts are machine-checked verbatim by
+  the test suite; applicability still needs a qualified human).
+
 Important caveats recorded on the entries themselves:
-* The RBI Master Directions PDF in the repository (RBI/DOS/2024-25/118,
-  15 Jul 2024) carries a "Withdrawn" watermark on every page. It may have
-  been superseded; the current RBI direction must be confirmed.
 * The FATF Recommendations do not name typologies such as "layering",
   "structuring" or "fan-in". Network-pattern entries therefore map to the
   general obligation to scrutinise unusual patterns of transactions, not to
@@ -34,7 +40,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-MAPPING_VERSION = "0.1.0-proposed"
+MAPPING_VERSION = "1.0.0"
 MAPPING_EXTRACTED_ON = "2026-11-21"
 
 
@@ -68,6 +74,11 @@ class VerificationStatus(str, Enum):
     UNVERIFIED = "UNVERIFIED"
     VERIFIED = "VERIFIED"
     REJECTED = "REJECTED"
+    SOURCE_WITHDRAWN = "SOURCE_WITHDRAWN"
+
+
+#: Statuses whose references must never be attached to a case.
+INACTIVE_STATUSES = frozenset({VerificationStatus.REJECTED, VerificationStatus.SOURCE_WITHDRAWN})
 
 
 class RegulatoryReference(BaseModel):
@@ -269,6 +280,7 @@ REFERENCES: dict[str, RegulatoryReference] = {
                 "preventive measures by the banks."
             ),
             source_file=_RBI_FILE,
+            verification_status=VerificationStatus.SOURCE_WITHDRAWN,
             caveats=[_RBI_WITHDRAWN, _RBI_FRAUD_NOT_AML],
         ),
         RegulatoryReference(
@@ -285,6 +297,7 @@ REFERENCES: dict[str, RegulatoryReference] = {
                 "misuse of banking channel."
             ),
             source_file=_RBI_FILE,
+            verification_status=VerificationStatus.SOURCE_WITHDRAWN,
             caveats=[_RBI_WITHDRAWN, _RBI_FRAUD_NOT_AML],
         ),
         RegulatoryReference(
@@ -303,6 +316,7 @@ REFERENCES: dict[str, RegulatoryReference] = {
                 "towards prevention of fraudulent activities."
             ),
             source_file=_RBI_FILE,
+            verification_status=VerificationStatus.SOURCE_WITHDRAWN,
             caveats=[_RBI_WITHDRAWN, _RBI_FRAUD_NOT_AML],
         ),
     ]
@@ -385,9 +399,20 @@ def _validate_registry() -> None:
 _validate_registry()
 
 
-def mappings_for(trigger: RegulatoryTrigger) -> list[MappingEntry]:
-    """All mapping entries for a trigger (empty list = unmapped)."""
-    return [m for m in MAPPINGS if m.trigger == trigger]
+def is_active(reference_id: str) -> bool:
+    """True if the reference may be attached to a case."""
+    ref = REFERENCES.get(reference_id)
+    return ref is not None and ref.verification_status not in INACTIVE_STATUSES
+
+
+def mappings_for(trigger: RegulatoryTrigger, include_inactive: bool = False) -> list[MappingEntry]:
+    """Mapping entries for a trigger (empty list = unmapped).
+
+    Entries whose reference is REJECTED or SOURCE_WITHDRAWN are excluded
+    unless ``include_inactive`` is True (registry inspection only).
+    """
+    return [m for m in MAPPINGS if m.trigger == trigger
+            and (include_inactive or is_active(m.reference_id))]
 
 
 def get_reference(reference_id: str) -> Optional[RegulatoryReference]:

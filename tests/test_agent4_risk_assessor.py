@@ -241,10 +241,17 @@ class TestConfig:
         assert set(cfg.weights) == set(RiskSignal)
         assert sum(cfg.weights.values()) == pytest.approx(1.0)
 
-    def test_default_is_marked_proposed(self):
+    def test_default_records_version_and_approval(self):
         cfg = Agent4Config()
-        assert "proposed" in cfg.config_version
-        assert cfg.approval_status.startswith("PROPOSED")
+        assert cfg.config_version == "1.0.0"
+        assert cfg.approval_status.startswith("APPROVED")
+        assert "SYNTHETIC" in cfg.approval_status
+        assert cfg.as_audit_dict()["high_anomaly_review_threshold"] == 0.70
+
+    def test_high_anomaly_threshold_validated(self):
+        with pytest.raises(ValueError, match="high_anomaly_review_threshold"):
+            Agent4Config(high_anomaly_review_threshold=1.5)
+        assert Agent4Config(high_anomaly_review_threshold=None).high_anomaly_review_threshold is None
 
     def test_weights_must_sum_to_one(self):
         w = dict(Agent4Config().weights)
@@ -302,7 +309,7 @@ class TestConfig:
     def test_audit_dict_contains_weights(self):
         d = Agent4Config().as_audit_dict()
         assert d["weights"]["ANOMALY"] == 0.30
-        assert d["config_version"] == "0.1.0-proposed"
+        assert d["config_version"] == "1.0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +325,12 @@ class TestRegulatoryRegistry:
         ids = [m.mapping_id for m in MAPPINGS]
         assert len(ids) == len(set(ids))
 
-    def test_all_references_unverified_pending_review(self):
-        assert all(r.verification_status == VerificationStatus.UNVERIFIED
-                   for r in REFERENCES.values())
+    def test_no_reference_claims_verified(self):
+        # FATF: UNVERIFIED pending qualified review; RBI: SOURCE_WITHDRAWN.
+        for r in REFERENCES.values():
+            expected = (VerificationStatus.SOURCE_WITHDRAWN if r.organization == "RBI"
+                        else VerificationStatus.UNVERIFIED)
+            assert r.verification_status == expected
 
     def test_rbi_references_carry_withdrawn_caveat(self):
         for r in REFERENCES.values():
@@ -637,6 +647,22 @@ class TestAssessment:
         assert "OVR-SANCTIONS-UNAVAILABLE" in [o.rule_id for o in out.overrides_applied]
         assert not out.sar_recommendation.recommended
 
+    def test_high_anomaly_alone_forces_review_without_sar(self):
+        out = assess(a1=make_a1(combined=0.75, xgb=0.8))
+        assert out.score_band_action in (RecommendedAction.CLEAR, RecommendedAction.MONITOR)
+        assert out.recommended_action == RecommendedAction.HUMAN_REVIEW
+        assert [o.rule_id for o in out.overrides_applied] == ["OVR-HIGH-ANOMALY"]
+        assert not out.sar_recommendation.recommended
+
+    def test_high_anomaly_below_threshold_no_override(self):
+        out = assess(a1=make_a1(combined=0.69, xgb=0.7))
+        assert "OVR-HIGH-ANOMALY" not in [o.rule_id for o in out.overrides_applied]
+
+    def test_high_anomaly_override_can_be_disabled(self):
+        out = assess(a1=make_a1(combined=0.95, xgb=0.95),
+                     cfg=Agent4Config(high_anomaly_review_threshold=None))
+        assert "OVR-HIGH-ANOMALY" not in [o.rule_id for o in out.overrides_applied]
+
     def test_low_coverage_forces_review_and_low_confidence(self):
         out = assess(a1=None, a2=None, a3=None)
         # only UNUSUAL_TIMING (0.05) available from the transaction itself
@@ -664,15 +690,33 @@ class TestAssessment:
         assert out.confidence == ConfidenceLevel.MEDIUM
         assert any("Agent 1 status COMPATIBILITY_WARNING" in r for r in out.confidence_reasons)
 
-    def test_mule_finding_maps_to_rbi_and_fatf(self):
+    def test_mule_finding_maps_to_fatf_not_withdrawn_rbi(self):
         out = assess(a3=make_a3(findings=[finding(NetworkPatternType.MULE_LIKE)]))
         refs = {(m.trigger, m.reference_id) for m in out.regulatory_matches}
-        assert (RegulatoryTrigger.MULE_LIKE, "RBI-FRM-3.4.2") in refs
         assert (RegulatoryTrigger.MULE_LIKE, "FATF-INR10-P20") in refs
+        assert not any(r.startswith("RBI-") for _, r in refs)
         m = out.regulatory_matches[0]
         assert m.case_transaction_id == "T-001"
         assert m.verification_status == VerificationStatus.UNVERIFIED
         assert m.excerpt and m.source_file and m.pdf_page > 0
+
+    def test_withdrawn_source_never_attached(self):
+        from src.agents.agent4.regulatory_mapping import MAPPINGS, REFERENCES, is_active
+        for rid, ref in REFERENCES.items():
+            if ref.organization == "RBI":
+                assert ref.verification_status == VerificationStatus.SOURCE_WITHDRAWN
+                assert not is_active(rid)
+        for trig in RegulatoryTrigger:
+            assert all(is_active(m.reference_id) for m in mappings_for(trig))
+        # Inactive entries are kept for traceability.
+        assert any(m.reference_id.startswith("RBI-") for m in MAPPINGS)
+        assert mappings_for(RegulatoryTrigger.MULE_LIKE, include_inactive=True) != \
+            mappings_for(RegulatoryTrigger.MULE_LIKE)
+
+    def test_every_mapped_trigger_keeps_an_active_reference(self):
+        for trig in RegulatoryTrigger:
+            if mappings_for(trig, include_inactive=True):
+                assert mappings_for(trig), f"{trig} lost all active references"
 
     def test_duplicate_patterns_mapped_once(self):
         out = assess(a3=make_a3(findings=[finding(), finding()]))
@@ -704,8 +748,8 @@ class TestAssessment:
 
     def test_config_and_mapping_recorded(self):
         out = assess()
-        assert out.config_version == "0.1.0-proposed"
-        assert out.config_approval_status.startswith("PROPOSED")
+        assert out.config_version == "1.0.0"
+        assert out.config_approval_status.startswith("APPROVED")
         assert out.mapping_version
         assert out.config_snapshot["weights"]["NETWORK_RISK"] == 0.20
 
