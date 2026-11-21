@@ -132,7 +132,7 @@ Agent3Output(
 | Status | Meaning |
 |--------|---------|
 | `COMPLETE` | All detectors ran; empty `findings` means no patterns met configured thresholds |
-| `PARTIAL` | Some detectors ran; others failed — check `detectors_skipped` |
+| `PARTIAL` | Some detectors ran; others failed — check `detectors_skipped`. Also used when the graph holds fewer than `min_graph_transfers` (default 100, `SENTINEL_A3_MIN_GRAPH_TRANSFERS`) transfers in total: the graph is empty or not loaded, so "no patterns" is not a clean result |
 | `UNAVAILABLE` | No graph data (accounts not found, unconfigured DB) |
 | `FAILED` | Critical failure — graph unreachable or invalid inputs |
 | `VALIDATION_ERROR` | Missing sender/receiver account_id |

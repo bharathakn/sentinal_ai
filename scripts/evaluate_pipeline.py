@@ -61,7 +61,7 @@ def main() -> None:
 
     rows = []
     t0 = time.time()
-    with Investigator() as inv:
+    with Investigator(generate_report=False) as inv:
         for rec in sample.to_dict("records"):
             tx = IndiaSyntheticAdapter.from_row({k: rec[k] for k in feats.columns})
             st = inv.investigate(tx)

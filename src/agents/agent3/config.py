@@ -96,6 +96,12 @@ class Agent3Config:
         Minimum number of transfer relationships within a candidate cluster.
         Default: 3 (v2; was 4)
 
+    min_graph_transfers : int
+        If the whole graph holds fewer TRANSFERRED_TO relationships than this,
+        it is treated as empty / not loaded: status PARTIAL with a warning,
+        because "no patterns found" would otherwise read as a clean result.
+        Default: 100.
+
     transfer_query_limit : int
         Maximum number of transfer rows fetched per account query.
         Prevents unbounded memory usage on accounts with many transfers.
@@ -159,6 +165,7 @@ class Agent3Config:
     cluster_min_edges: int = 3
 
     transfer_query_limit: int = 200
+    min_graph_transfers: int = 100
     layering_path_limit: int = 5
 
     # --- v2 temporal parameters (Phase 9.5) ---
@@ -216,6 +223,7 @@ class Agent3Config:
             cluster_min_accounts=_int("SENTINEL_A3_CLUSTER_MIN_ACCOUNTS", 3),
             cluster_min_edges=_int("SENTINEL_A3_CLUSTER_MIN_EDGES", 3),
             transfer_query_limit=_int("SENTINEL_A3_TRANSFER_QUERY_LIMIT", 200),
+            min_graph_transfers=_int("SENTINEL_A3_MIN_GRAPH_TRANSFERS", 100),
             layering_path_limit=_int("SENTINEL_A3_LAYERING_PATH_LIMIT", 5),
             lookback_hours=_float("SENTINEL_A3_LOOKBACK_HOURS", 168.0),
             horizon_hours=_float("SENTINEL_A3_HORIZON_HOURS", 24.0),

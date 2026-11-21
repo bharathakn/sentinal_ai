@@ -35,6 +35,8 @@ production differ only in environment variables:
 | `SENTINEL_REQUIRE_IEEE_MODELS` | `true` | `false` |
 | `SENTINEL_NEWS_PROVIDER` | `mock` | `mock` (or `live` + `NEWS_API_KEY`) |
 | `GROQ_API_KEY` | `.env` | Render secret |
+| `GROQ_MODEL` | default `openai/gpt-oss-120b` | same |
+| `SENTINEL_REPORT_GENERATOR` | `llm` | `llm` (template fallback is automatic) |
 
 The Neo4j driver accepts `bolt://`, `neo4j://` and `neo4j+s://` URIs, so
 switching to AuraDB needs no code change. Credentials are never committed;
@@ -67,7 +69,11 @@ NEO4J_URI=neo4j+s://... NEO4J_USERNAME=... NEO4J_PASSWORD=... \
   python scripts/load_india_sample_graph.py --reset-india
 ```
 
-The current graph has 1,504 nodes and 10,002 relationships. AuraDB Free
+The current graph has 1,500 accounts and 10,000 transfers. The loader writes
+500 transfers per transaction (`load_batch_unwind`); loading the full graph
+into AuraDB took 8 s on 2026-11-21, against an estimated hour with
+one transaction per record. The pipeline is slower against a remote graph:
+about 0.9 s per investigation, against 0.07 s locally. AuraDB Free
 allows 200,000 nodes and 400,000 relationships. AuraDB Free pauses idle
 instances and deletes them if they are not resumed. The original AuraDB
 instance in `.env` no longer resolves, most likely for this reason. Before a
@@ -92,6 +98,9 @@ demo, check that the instance is running.
    to the browser (e.g. `VITE_*`) must contain only the API base URL.
 6. **LLM availability.** Agent 5 falls back to the template writer when Groq
    fails, so a missing or rate-limited key never blocks an investigation.
+   The free Groq tier allows about 8,000 tokens/min, roughly one LLM report
+   per 40 s. A demo with several analysts needs Groq's paid Dev tier or
+   should accept template reports.
 7. **Python version.** `.python-version` pins the version that Render uses.
 8. **Synthetic data only.** The deployed system serves synthetic data and
    mock providers. Pages must not present results as real customer data.

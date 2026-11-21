@@ -132,7 +132,7 @@ def load_sample(limit: int | None = None, reset_india: bool = False) -> None:
 
             # Load transactions
             loader = TransactionGraphLoader(mgr.session, batch_size=500)
-            result = loader.load_batch(canonical_transactions)
+            result = loader.load_batch_unwind(canonical_transactions)
 
             logger.info(
                 "Load complete: total=%d, succeeded=%d, failed=%d, "

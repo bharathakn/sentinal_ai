@@ -838,6 +838,7 @@ def _make_mock_manager(
     incoming: list = None,
     cluster: list = None,
     paths: list = None,
+    graph_transfers: int = None,
 ):
     """Build a mock Neo4jConnectionManager returning specified data."""
     mgr = MagicMock()
@@ -866,6 +867,8 @@ def _make_mock_manager(
             r = MagicMock()
             r.single.return_value = {"count": count}
             return r
+        if "COUNT(R) AS TRANSFERS" in c:
+            return _run_result([] if graph_transfers is None else [{"transfers": graph_transfers}])
         # v2 queries: data is attached to the sender (ACC_A) only
         is_sender = kwargs.get("account_id") == "ACC_A"
         if "R0:TRANSFERRED_TO" in c:
@@ -923,6 +926,24 @@ class TestNetworkAnalyserAgentPipeline:
         agent = self._agent(mgr=_make_mock_manager())
         result = agent.analyse(tx)
         assert result.status == Agent3Status.VALIDATION_ERROR
+
+    def test_empty_graph_is_partial_not_clean(self):
+        mgr = _make_mock_manager(graph_transfers=3, outgoing=[], incoming=[], cluster=[], paths=[])
+        result = self._agent(mgr=mgr).analyse(_make_tx())
+        assert result.status == Agent3Status.PARTIAL
+        assert result.findings == []
+        assert any("appears empty or not loaded" in w for w in result.warnings)
+
+    def test_populated_graph_stays_complete(self):
+        mgr = _make_mock_manager(graph_transfers=10_000, outgoing=[], incoming=[], cluster=[], paths=[])
+        result = self._agent(mgr=mgr).analyse(_make_tx())
+        assert result.status == Agent3Status.COMPLETE
+        assert not any("appears empty" in w for w in result.warnings)
+
+    def test_min_graph_transfers_configurable(self):
+        mgr = _make_mock_manager(graph_transfers=3, outgoing=[], incoming=[], cluster=[], paths=[])
+        result = self._agent(mgr=mgr, min_graph_transfers=0).analyse(_make_tx())
+        assert result.status == Agent3Status.COMPLETE
 
     def test_account_not_in_graph_gives_unavailable(self):
         mgr = _make_mock_manager(sender_exists=False, receiver_exists=False)

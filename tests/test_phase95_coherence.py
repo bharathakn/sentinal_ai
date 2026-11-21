@@ -131,6 +131,15 @@ class TestIndiaStore:
         acc = small_data[1]["transactions_features"]["sender_account_id"].iloc[0]
         assert india_store.get_transaction_history(acc)
 
+    def test_label_account_type_masked(self, small_data, india_store):
+        acc = small_data[1]["accounts"]
+        mules = acc[acc["account_type"] == "MULE_SUSPECT"]["account_id"]
+        assert len(mules) > 0
+        for a in mules:
+            assert india_store.get_account(a)["account_type"] is None
+        normal = acc[acc["account_type"] == "SAVINGS"]["account_id"].iloc[0]
+        assert india_store.get_account(normal)["account_type"] == "SAVINGS"
+
     def test_does_not_need_targets_file(self, small_data, tmp_path):
         for name in ("customers", "accounts", "devices", "beneficiaries", "transactions_features"):
             (tmp_path / f"{name}.csv").write_bytes((small_data[0] / f"{name}.csv").read_bytes())
@@ -364,3 +373,8 @@ class TestCaseStateAndFirewall:
         assert seen == [("a1", None), ("a3", True)]  # labels stripped before Agent 1
         assert state["case_id"] == "CASE-T"
         assert state["agent4_output"].status.value == "COMPLETE"
+        # Agent 5 runs last and writes a draft report (template in tests)
+        r = state["agent5_output"]
+        assert r.case_id == "CASE-T" and r.generator.value == "TEMPLATE"
+        assert r.validation_status == "NOT_VALIDATED"
+        assert Investigator(agent1=FakeA1(), agent3=FakeA3(), generate_report=False).agent5 is None

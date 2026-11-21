@@ -50,4 +50,14 @@ outputs — can see labels. `metadata.alert_id` and `is_flagged_fraud` are kept
 (they describe the monitoring alert).
 
 Until LangGraph orchestration (Phase 12), `src/agents/investigation.Investigator`
-runs Agents 1–4 sequentially with the same state contract.
+runs Agents 1–5 sequentially with the same state contract
+(`generate_report=False` stops after Agent 4).
+
+## State fields
+
+| Field | Written by |
+|---|---|
+| `case_id`, `case_created_at_utc`, `transaction` | `new_case_state` |
+| `agent1_output` … `agent4_output` | Agents 1–4 |
+| `agent5_output` | Agent 5: draft report, evidence bundle, decision copy (`NOT_VALIDATED`) |
+| validation result | Output Validator (Phase 11) |

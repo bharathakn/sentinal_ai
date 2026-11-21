@@ -125,6 +125,10 @@ def _income_band(income: Optional[float]) -> Optional[str]:
     return "INR_ABOVE_25L"
 
 
+#: India dataset account_type values that are ground-truth labels.
+LABEL_ACCOUNT_TYPES = frozenset({"MULE_SUSPECT"})
+
+
 class IndiaSyntheticStore:
     backend_name = "india_synthetic"
     source_prefix = "SYNTHETIC_INDIA"
@@ -197,7 +201,10 @@ class IndiaSyntheticStore:
             "customer_name": f"{cust.get('customer_name_synthetic')} (SYNTHETIC)" if cust else None,
             "kyc_status": cust.get("kyc_status", "UNKNOWN"),
             "pep": bool(cust.get("pep_flag")) if cust else None,
-            "account_type": acc.get("account_type"),
+            # MULE_SUSPECT is the generator's ground-truth marker, not a bank
+            # product type: masked (not replaced) so no agent can read it.
+            "account_type": (None if acc.get("account_type") in LABEL_ACCOUNT_TYPES
+                             else acc.get("account_type")),
             "bank_name": None,
             "ifsc_code": acc.get("ifsc_code_synthetic"),
             "account_opening_date": opened,

@@ -48,6 +48,9 @@ Known beneficiaries = prior payees plus registered beneficiaries added at
 least 30 days earlier.
 
 **Label firewall:** the India store never reads `transactions_targets.csv`.
+The India dataset's `account_type = MULE_SUSPECT` is the generator's
+ground-truth marker, not a bank product type; the store masks it to `None`
+(`LABEL_ACCOUNT_TYPES`) so no agent or report can read it.
 It has no fraud-flag registry, so `previous_fraud_flag` is False with a
 "not determinable" warning.
 

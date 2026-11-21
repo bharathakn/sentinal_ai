@@ -17,6 +17,7 @@ full project review (see "Why the plan changed").
 | 8 | Agent 3 Network Analyser |
 | 9 | Agent 4 Risk Assessor (config + mapping 1.0.0 approved 2026-11-21) |
 | 9.5 | Investigation data coherence & hardening (see below) |
+| 10 | Agent 5 Explanation Generator (see below) |
 
 ## Why the plan changed
 
@@ -66,31 +67,62 @@ redesigned so that the LLM report is mechanically verifiable.
    alerts and a legitimate sample; publish the action-versus-label table as
    evidence for approving (or changing) the proposed weights. No silent tuning.
 
-## Phase 10 — Agent 5 Explanation Generator (NEXT)
+## Phase 10 — Agent 5 Explanation Generator (COMPLETE)
 
-1. **Evidence bundle.** A deterministic builder turns the case state into a
-   flat list of facts, each with a stable id (`F-001` …), value, source agent,
-   source field path, source mode and timestamp. Label fields never enter it.
-2. **Structured generation.** The Groq LLM returns JSON: the seven report
-   sections, each a list of statements, and every statement cites fact ids.
-   The LLM writes prose only; score, action, SAR recommendation and regulatory
-   references are copied from Agent 4, never decided by the LLM.
-3. **Template fallback.** If no API key is configured, the call fails, or the
-   output cannot be parsed, a deterministic template writer produces the same
-   structure (`generator = TEMPLATE`). The pipeline never blocks on the LLM.
-4. Missing data rendered as `Not identified`.
+Details: `docs/02_AGENTS/AGENT_5_EXPLANATION_GENERATOR.md`.
+1. **Evidence bundle.** A deterministic builder produces numbered, sourced
+   facts (`F-001` …), formatted once, with `Not identified` for missing data,
+   a bundle hash, and the label firewall applied again.
+2. **LLM narrative.** Groq `openai/gpt-oss-120b`, strict JSON-schema output.
+   It writes the narrative for Case Summary, Anomaly Findings, Evidence
+   Summary, Network Analysis and Recommended Action. Every statement cites
+   facts, and the output is checked structurally.
+3. **Deterministic content.** The decision block, Regulatory Assessment and
+   Source Audit Trail are written by code. The decision is copied from
+   Agent 4.
+4. **Template fallback.** Used when no LLM is configured or on any LLM
+   failure, so the pipeline never blocks.
 
-## Phase 11 — Output Validator
+Added during Phase 10:
+- India store masks `account_type = MULE_SUSPECT` (a ground-truth marker).
+- Agent 3 reports PARTIAL when the graph holds < `min_graph_transfers`
+  transfers (empty / unloaded graph is not a clean result).
 
-Deterministic checks against the evidence bundle:
-- every statement cites ≥1 existing fact id
-- every amount, date/time, account / customer / device id in the text appears
-  in a cited fact
-- regulatory references ⊆ Agent 4 regulatory matches
-- recommended action and SAR recommendation equal Agent 4's
-- all seven sections present; no label leakage
+## Phase 11 — Output Validator (NEXT)
 
-Result `VALIDATED` or `NEEDS_HUMAN_REVIEW`, with per-check results.
+Deterministic checks of `agent5_output` against its evidence bundle and
+Agent 4. Result `VALIDATED` or `NEEDS_HUMAN_REVIEW`, with per-check results
+kept on the case.
+
+1. **Structure.** Seven sections in order, each non-empty. Every statement
+   cites at least one fact id that exists in the bundle.
+2. **Citation grounding.** Every amount, number, date/time and identifier
+   (CASE-, TXN_, ACC_, CUST_, DEV_, rule ids) in a statement must appear in a
+   fact that the statement cites. Normalise before comparing (thousands
+   separators, `273` = `273.0`, date formats). Extract identifiers before
+   numbers, so the digits inside an id are not treated as amounts. Phase 10
+   produced a real failure of this kind: a correct date cited against facts
+   that do not contain it.
+3. **Decision consistency.** `decision` equals Agent 4. The SYSTEM decision
+   statement matches it. An action name in LLM text must appear in a cited
+   fact.
+4. **Regulatory.** Referenced ids ⊆ Agent 4 regulatory matches. LLM
+   statements name no regulator or regulation (FATF, RBI, PMLA, FIU,
+   "Recommendation n").
+5. **Language.** No conclusive wording in LLM text ("confirmed fraud",
+   "is a money mule", "proves", "laundered" …). LLM statements about SAR/STR
+   must not contradict `decision.sar_recommended`, e.g. negated SAR wording
+   when a SAR is recommended.
+6. **Leakage.** No dataset label strings (FRAUDULENT, LEGITIMATE,
+   BORDERLINE, SCENARIO_, MULE_SUSPECT).
+7. **Integrity.** The bundle hash recomputes. Every fact has a source. The
+   audit trail cites every fact.
+
+Decide in Phase 11: when an LLM report fails, also validate the template
+report for the same bundle and present it, keeping the failed LLM report and
+its check results for audit. Meaning-level misreadings (e.g. "average debit"
+described as the average of all transactions) cannot be detected
+deterministically and remain an analyst-review item.
 
 ## Phase 12 — LangGraph Orchestration
 

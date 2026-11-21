@@ -18,15 +18,22 @@ Sentinel AI
 | 8 — Agent 3 Network Analyser | COMPLETE (rules superseded by v2 in 9.5) |
 | 9 — Agent 4 Risk Assessor | COMPLETE (config + mapping 1.0.0 approved) |
 | 9.5 — Investigation data coherence & hardening | COMPLETE |
-| **10 — Agent 5 Explanation Generator** | **NEXT** |
+| 10 — Agent 5 Explanation Generator | COMPLETE |
+| **11 — Output Validator** | **NEXT** |
 
 See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
 
-Phase 9.5 complete: every agent now works on one coherent investigation world
-(India synthetic dataset v2). 907/907 tests passing, 0 skipped (live Neo4j
-tests run against the local Docker instance).
+Phase 10 complete: Agents 1–5 run end to end. Each case ends with a seven-section
+draft report in which every statement cites numbered evidence facts. Groq
+writes the narrative; the decision block, regulatory section and audit trail
+are deterministic; a template writer is the fallback. Reports stay
+`NOT_VALIDATED` until Phase 11. Next: Output Validator (design in
+`docs/plans/ROADMAP.md`).
+
+Phase 9.5: every agent works on one coherent investigation world (India
+synthetic dataset v2).
 
 End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
 0% ESCALATE/BLOCK (0.3% HUMAN_REVIEW); fraudulent → 83% ESCALATE/BLOCK and
@@ -34,6 +41,21 @@ End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
 
 Deployment target (Vercel + Render) recorded in
 `docs/14_OPERATIONS/DEPLOYMENT.md`; deploy-compatibility groundwork is done.
+
+## Phase 10 summary
+
+- `src/agents/agent5/`: evidence bundle (`facts.py`), Groq client with strict
+  JSON-schema output (`llm_client.py`), prompt + structural parser
+  (`prompt.py`), template and SYSTEM writers (`writers.py`), agent
+  (`explanation_generator.py`), Markdown rendering (`render.py`).
+- `Investigator` runs Agent 5 (`generate_report=False` for bulk evaluation);
+  `scripts/run_investigation.py` prints or writes the report.
+- Fixes found while building it: India store masks the `MULE_SUSPECT` label;
+  Agent 3 reports PARTIAL on an empty / unloaded graph; bulk graph loader
+  (`load_batch_unwind`; full load into AuraDB in 8 s instead of ~1 h).
+- Verified on AuraDB: 95-case sample gives identical Agent 4 results to the
+  local graph. LLM reports produced for normal, layering, high-value spike,
+  new-device and borderline-travel cases.
 
 ## Phase 9.5 summary
 
@@ -59,8 +81,9 @@ Deployment target (Vercel + Render) recorded in
 ## Environment (2026-11-21)
 
 - Work is committed directly on `main`.
-- Neo4j: local Docker container `sentinel-neo4j` (bolt://localhost:7687,
-  volume `sentinel_neo4j_data`), loaded with all 10,000 v2 transactions.
+- Neo4j: `.env` now points to the project owner's AuraDB instance
+  (changed 2026-11-21), loaded with all 10,000 v2 transactions. The local
+  Docker container `sentinel-neo4j` still exists with its own copy of the graph.
 - MongoDB Atlas: cluster in `MONGODB_URI` no longer resolves. Deferred by the
   project owner.
 - Groq and NewsAPI keys verified working.

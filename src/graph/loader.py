@@ -117,6 +117,13 @@ RETURN
     (CASE WHEN r.raw_record_id IS NOT NULL THEN 0 ELSE 1 END)   AS rel_created_hint
 """
 
+# Bulk variant: one write transaction per chunk (same MERGE semantics).
+# Used for remote databases (AuraDB), where one round trip per record is slow.
+_LOAD_BATCH_UNWIND_CYPHER = "UNWIND $rows AS row\n" + (
+    _LOAD_TRANSACTION_CYPHER.split("RETURN")[0]
+    .replace("$", "row.")
+) + "RETURN count(r) AS written"
+
 # Separate counting query — used to report created vs matched counts accurately.
 # Neo4j counters from execute_write are reliable via ManagedTransaction.
 _COUNT_QUERY = """
@@ -165,6 +172,23 @@ class TransactionGraphLoader:
     # ------------------------------------------------------------------
     # Single-record load
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _params(tx: CanonicalTransaction) -> dict:
+        rel_props = relationship_properties(tx)
+        source_dataset = rel_props["source_dataset"]
+        sender_props = account_properties(tx.sender, source_dataset)
+        receiver_props = account_properties(tx.receiver, source_dataset)
+        return {
+            "sender_account_id": sender_props["account_id"],
+            "sender_source_dataset": sender_props.get("source_dataset", source_dataset),
+            "sender_account_name": sender_props.get("account_name"),
+            "receiver_account_id": receiver_props["account_id"],
+            "receiver_source_dataset": receiver_props.get("source_dataset", source_dataset),
+            "receiver_account_name": receiver_props.get("account_name"),
+            **{k: rel_props[k] for k in ("tx_graph_id", "raw_record_id", "source_dataset", "amount",
+                                         "amount_str", "currency", "timestamp_utc", "channel", "status")},
+        }
 
     def load_transaction(self, tx: CanonicalTransaction) -> LoadResult:
         """
@@ -312,4 +336,41 @@ class TransactionGraphLoader:
                         exc,
                     )
 
+        return agg
+
+    def load_batch_unwind(self, transactions: Sequence[CanonicalTransaction]) -> BatchLoadResult:
+        """Bulk load: validate each record, then write each chunk of
+        ``batch_size`` records in ONE transaction (UNWIND). Idempotent (MERGE).
+
+        Mapping errors are recorded per record; a failed chunk is recorded for
+        every record in it and later chunks continue.
+        """
+        agg = BatchLoadResult(total=len(transactions))
+        rows: list[tuple[str, dict]] = []
+        for tx in transactions:
+            try:
+                validate_for_graph(tx)
+                rows.append((tx.raw_record_id, self._params(tx)))
+            except GraphMappingError as exc:
+                agg.failed += 1
+                agg.errors.append(f"Validation error for {tx.raw_record_id!r}: {exc}")
+
+        def write(tx_fn, chunk: list[dict]) -> dict:
+            summary = tx_fn.run(_LOAD_BATCH_UNWIND_CYPHER, rows=chunk).consume()
+            return {"nodes_created": summary.counters.nodes_created,
+                    "relationships_created": summary.counters.relationships_created}
+
+        for start in range(0, len(rows), self.batch_size):
+            chunk = rows[start: start + self.batch_size]
+            try:
+                with self._session_factory() as session:
+                    res = session.execute_write(write, [p for _, p in chunk])
+                agg.succeeded += len(chunk)
+                agg.nodes_created += res["nodes_created"]
+                agg.relationships_created += res["relationships_created"]
+            except Exception as exc:  # noqa: BLE001
+                agg.failed += len(chunk)
+                agg.errors.append(f"Write error for chunk starting {chunk[0][0]!r} ({len(chunk)} records): "
+                                  f"{type(exc).__name__}: graph write failed.")
+                logger.error("Graph chunk write failed: %s", type(exc).__name__)
         return agg

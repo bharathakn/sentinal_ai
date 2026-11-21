@@ -157,6 +157,9 @@ LIMIT 50
 """
 
 
+_GRAPH_TRANSFER_COUNT = "MATCH ()-[r:TRANSFERRED_TO]->() RETURN count(r) AS transfers"
+
+
 def _iso_utc(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -427,9 +430,27 @@ class NetworkAnalyserAgent:
             )
 
         # ------------------------------------------------------------------
-        # Step 3: Analysis window around the investigated transaction (v2)
+        # Step 2b: Graph population check. An empty / unloaded graph must not
+        # produce a COMPLETE "no patterns" result.
         # ------------------------------------------------------------------
         cfg = self._config
+        graph_underpopulated = False
+        try:
+            cnt = self._run(mgr, _GRAPH_TRANSFER_COUNT)
+            if cnt and cnt[0].get("transfers") is not None:
+                total = int(cnt[0]["transfers"])
+                if total < cfg.min_graph_transfers:
+                    graph_underpopulated = True
+                    warnings.append(
+                        f"Graph holds only {total} transfer(s) (minimum {cfg.min_graph_transfers}); it appears "
+                        "empty or not loaded. Absence of network patterns is not a clean result."
+                    )
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"Graph size check failed: {type(exc).__name__}")
+
+        # ------------------------------------------------------------------
+        # Step 3: Analysis window around the investigated transaction (v2)
+        # ------------------------------------------------------------------
         anchor = transaction.timestamp
         if anchor is None:
             warnings.append(
@@ -525,7 +546,7 @@ class NetworkAnalyserAgent:
         # ------------------------------------------------------------------
         status = (
             Agent3Status.PARTIAL
-            if detectors_skipped
+            if detectors_skipped or graph_underpopulated
             else Agent3Status.COMPLETE
         )
 

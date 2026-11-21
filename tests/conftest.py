@@ -37,6 +37,11 @@ def _load_neo4j_env() -> None:
 
 _load_neo4j_env()
 
+# Agent 5 must never call a real LLM from the offline suite, even when the
+# shell exports GROQ_API_KEY. Live LLM tests opt in explicitly
+# (SENTINEL_LIVE_LLM_TESTS=1) and build their own client.
+os.environ["SENTINEL_REPORT_GENERATOR"] = "template"
+
 
 # ---------------------------------------------------------------------------
 # Dataset fixture helpers

@@ -64,6 +64,13 @@ docker run -d --name sentinel-neo4j --restart unless-stopped \
 Set in `.env`: `NEO4J_URI=bolt://localhost:7687`, `NEO4J_USERNAME=neo4j`,
 `NEO4J_PASSWORD=<password>`, `NEO4J_DATABASE=neo4j`.
 
+AuraDB works the same way (`NEO4J_URI=neo4j+s://…`). **`.env` decides which
+database the scripts and the live tests use.** Live integration tests create
+and delete their own prefixed test accounts there. The graph must be loaded
+(step 3 below) into whichever database `.env` points to. Otherwise Agent 3
+reports PARTIAL ("graph appears empty or not loaded"). The loader writes in
+bulk (500 per transaction), so a full load into AuraDB takes seconds.
+
 ## Rebuild the India investigation world
 
 Steps 1–2 in one idempotent command (also the Render build step; see
@@ -74,21 +81,24 @@ Steps 1–2 in one idempotent command (also the Render build step; see
 PYTHONPATH=. .venv/bin/python scripts/generate_synthetic_dataset.py
 # 2. Train the India behavioural model for Agent 1 (~5 s)
 PYTHONPATH=. .venv/bin/python scripts/train_india_model.py
-# 3. Load all transactions into Neo4j (labels are never loaded; ~1 min)
+# 3. Load all transactions into Neo4j (labels are never loaded; seconds)
 PYTHONPATH=. .venv/bin/python scripts/load_india_sample_graph.py --reset-india
 ```
 
 ## Run investigations
 
 ```bash
-# One transaction through Agents 1–4 (prints the dataset label for comparison only)
+# One transaction through Agents 1–5 and print the draft report
+# (--template: no LLM call; --no-report: stop after Agent 4; --report-out FILE.md)
 PYTHONPATH=. .venv/bin/python scripts/run_investigation.py TXN_IND_202608_000977
 # End-to-end evaluation on a labelled sample (~30 s)
 PYTHONPATH=. .venv/bin/python scripts/evaluate_pipeline.py
 ```
 
 These scripts use `SENTINEL_EVIDENCE_BACKEND=india_synthetic` by default.
-Unit tests use the `fixture` backend.
+Unit tests use the `fixture` backend. The report uses Groq when `GROQ_API_KEY`
+is set. On the free tier (~8,000 tokens/min), generate at most about one
+report per 40 s; otherwise the template writer is used.
 
 Browser UI: http://localhost:7474
 
@@ -98,8 +108,10 @@ Browser UI: http://localhost:7474
 .venv/bin/python -m pytest tests/ -q
 ```
 
-907 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`; the
-29 live Neo4j integration tests skip when those are not set. The Agent 4
+About 960 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`;
+the 29 live Neo4j integration tests skip when those are not set. The suite
+forces the template report writer (no LLM calls). Set
+`SENTINEL_LIVE_LLM_TESTS=1` to run the single live Groq test. The Agent 4
 regulatory-excerpt provenance test needs `pdftotext` (poppler-utils) and
 skips without it.
 

@@ -92,11 +92,17 @@ A deterministic validation layer must check the generated report before it reach
 
 ## Current Status
 
-- **Phase 1 — Canonical Transaction Schema & Adapters**: COMPLETE & VERIFIED (Pydantic v2 schema, IEEE-CIS, PaySim, India Synthetic adapters, 82 tests passing).
-- **Phase 2 — ML Data Pipeline**: COMPLETE & VERIFIED (XGBoost supervised model & Isolation Forest unsupervised anomaly detector, preprocessing pipeline, 117 tests passing).
-- **Phase 3 — Model Evaluation & Explainability Foundation**: COMPLETE & VERIFIED (Threshold calibration, validation isolation, SHAP feature attribution, Agent 1 ML scoring layer, 66 tests passing).
-- **Test Suite**: **265 automated tests** passing across all layers (`.venv/bin/python -m pytest tests/`).
-- **Next Planned Phase**: Phase 4 — Agent 1 Anomaly Detector (LangGraph Node & State Integration).
+Phases 1–10 are complete: canonical schema, ML models, Agents 1–5 (anomaly
+detection, evidence gathering, network analysis, risk assessment, grounded
+report generation). Next is Phase 11, the Output Validator. The authoritative
+status, plan and open decisions live in `docs/plans/CURRENT.md` and
+`docs/plans/ROADMAP.md`.
+
+Run one synthetic case end to end:
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_investigation.py TXN_IND_202608_000977
+```
 
 ## Quickstart & Verification
 

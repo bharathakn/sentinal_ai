@@ -774,6 +774,55 @@ class TestBatchLimits:
         assert result.total == 5
 
 
+class TestLoadBatchUnwind:
+    """Bulk loader: one write transaction per chunk."""
+
+    def _session(self, fail_on_call=None):
+        calls = []
+        session = MagicMock()
+        session.__enter__ = MagicMock(return_value=session)
+        session.__exit__ = MagicMock(return_value=False)
+
+        def execute_write(fn, chunk):
+            calls.append(chunk)
+            if fail_on_call is not None and len(calls) == fail_on_call:
+                raise RuntimeError("boom secret")
+            fake_tx = MagicMock()
+            summary = MagicMock()
+            summary.counters.nodes_created = 2
+            summary.counters.relationships_created = len(chunk)
+            fake_tx.run.return_value.consume.return_value = summary
+            return fn(fake_tx, chunk)
+
+        session.execute_write.side_effect = execute_write
+        return session, calls
+
+    def test_chunks_and_counts(self):
+        session, calls = self._session()
+        loader = TransactionGraphLoader(lambda: session, batch_size=2)
+        txs = [_make_tx(raw_record_id=f"TXN_{i:03d}") for i in range(5)]
+        r = loader.load_batch_unwind(txs)
+        assert [len(c) for c in calls] == [2, 2, 1]
+        assert r.total == 5 and r.succeeded == 5 and r.failed == 0
+        assert r.relationships_created == 5
+        assert calls[0][0]["raw_record_id"] == "TXN_000"
+        assert set(calls[0][0]) >= {"sender_account_id", "receiver_account_id", "tx_graph_id", "timestamp_utc"}
+
+    def test_failed_chunk_recorded_and_later_chunks_continue(self):
+        session, calls = self._session(fail_on_call=1)
+        loader = TransactionGraphLoader(lambda: session, batch_size=2)
+        r = loader.load_batch_unwind([_make_tx(raw_record_id=f"TXN_{i:03d}") for i in range(4)])
+        assert r.succeeded == 2 and r.failed == 2 and len(calls) == 2
+        assert "secret" not in r.errors[0]
+
+    def test_unwind_cypher_matches_single_record_merge(self):
+        from src.graph.loader import _LOAD_BATCH_UNWIND_CYPHER, _LOAD_TRANSACTION_CYPHER
+        assert _LOAD_BATCH_UNWIND_CYPHER.startswith("UNWIND $rows AS row")
+        body = _LOAD_TRANSACTION_CYPHER.split("RETURN")[0]
+        assert body.replace("$", "row.") in _LOAD_BATCH_UNWIND_CYPHER
+        assert "$" not in _LOAD_BATCH_UNWIND_CYPHER.replace("$rows", "")
+
+
 # ---------------------------------------------------------------------------
 # Schema tests (mocked)
 # ---------------------------------------------------------------------------

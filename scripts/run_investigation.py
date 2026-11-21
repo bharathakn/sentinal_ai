@@ -2,7 +2,8 @@
 """Run the Sentinel AI investigation pipeline on one India synthetic transaction.
 
 Usage:
-    PYTHONPATH=. python scripts/run_investigation.py TXN_IND_202608_000123 [--json]
+    PYTHONPATH=. python scripts/run_investigation.py TXN_IND_202608_000123 [--json] [--template]
+        [--no-report] [--report-out FILE.md]
 
 Uses the India synthetic evidence backend and the local Neo4j graph
 (NEO4J_* in .env). Ground-truth labels are never given to the agents; the
@@ -39,6 +40,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("transaction_id")
     ap.add_argument("--json", action="store_true", help="Print the full Agent 4 output as JSON")
+    ap.add_argument("--template", action="store_true", help="Use the template report writer (no LLM call)")
+    ap.add_argument("--no-report", action="store_true", help="Stop after Agent 4")
+    ap.add_argument("--report-out", default=None, help="Write the Markdown report to this file")
     a = ap.parse_args()
 
     logging.basicConfig(level=logging.WARNING)
@@ -49,13 +53,15 @@ def main() -> None:
         pass
     os.environ.setdefault("SENTINEL_EVIDENCE_BACKEND", "india_synthetic")
     os.environ.setdefault("SENTINEL_NEWS_PROVIDER", "mock")
+    if a.template:
+        os.environ["SENTINEL_REPORT_GENERATOR"] = "template"
 
     from src.agents.investigation import Investigator
     from src.schemas.adapters.india_adapter import IndiaSyntheticAdapter
 
     row, label = load_row(a.transaction_id)
     tx = IndiaSyntheticAdapter.from_row(row)  # features only; labels are not passed in
-    with Investigator() as inv:
+    with Investigator(generate_report=not a.no_report) as inv:
         state = inv.investigate(tx)
 
     a1, a2, a3, a4 = (state[k] for k in ("agent1_output", "agent2_output", "agent3_output", "agent4_output"))
@@ -76,6 +82,20 @@ def main() -> None:
         print("  overrides:", [o.rule_id for o in a4.overrides_applied])
     print("  regulatory:", sorted({m.reference_id for m in a4.regulatory_matches}))
     print("  unmapped:", [u.value for u in a4.unmapped_triggers])
+    a5 = state.get("agent5_output")
+    if a5 is not None:
+        from src.agents.agent5 import render_markdown
+        print(f"Agent 5  {a5.status.value:22} generator={a5.generator.value if a5.generator else None} "
+              f"model={a5.llm_model} facts={len(a5.evidence_bundle.facts) if a5.evidence_bundle else 0} "
+              f"validation={a5.validation_status}")
+        if a5.fallback_reason:
+            print(f"  LLM not used: {a5.fallback_reason}")
+        md = render_markdown(a5)
+        if a.report_out:
+            Path(a.report_out).write_text(md)
+            print(f"  report written to {a.report_out}")
+        else:
+            print("\n" + md)
     print(f"Dataset label (NOT given to agents): {label['risk_label']} / {label['scenario_id']}")
 
 
