@@ -84,8 +84,11 @@ Deployment target (Vercel + Render) recorded in
 - Neo4j: `.env` now points to the project owner's AuraDB instance
   (changed 2026-11-21), loaded with all 10,000 v2 transactions. The local
   Docker container `sentinel-neo4j` still exists with its own copy of the graph.
-- MongoDB Atlas: cluster in `MONGODB_URI` no longer resolves. Deferred by the
-  project owner.
+- MongoDB Atlas: new cluster configured and verified 2026-11-21 (ping,
+  write, read, delete; MongoDB 8.0). Network access allows the developer IP
+  only; Render will need `0.0.0.0/0` or equivalent at deployment. Not yet
+  used by code: the case store arrives in Phase 13 (add `pymongo` to
+  requirements then).
 - Groq and NewsAPI keys verified working.
 - Rebuild sequence: generate dataset → train India model → load graph
   (see `docs/14_OPERATIONS/DEVELOPMENT_SETUP.md`).
@@ -102,7 +105,7 @@ Deployment target (Vercel + Render) recorded in
 - Supply the current RBI direction and PMLA / FIU-IND PDFs to restore India
   mappings.
 - Case store for the hosted deployment (Render disk is ephemeral): MongoDB
-  Atlas when un-deferred.
+  Atlas, now available (Phase 13).
 
 ## Known limitations
 
