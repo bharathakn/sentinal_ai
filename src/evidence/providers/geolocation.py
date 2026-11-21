@@ -4,7 +4,7 @@ Sentinel AI — Mock Geolocation provider.
 Compares transaction location with the registered account location and
 calculates approximate distance using the Haversine formula.
 
-All location data comes from fixture_data.py (single source of truth).
+All location data comes from the active evidence data store (data_store.py).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from ..fixture_data import get_account, SYNTHETIC_DATA_NOTICE
+from ..data_store import get_store
 from ..schemas import (
     EvidenceStatus,
     GeolocationData,
@@ -20,7 +20,7 @@ from ..schemas import (
     SourceMode,
 )
 
-_SOURCE = "MOCK_GEOLOCATION"
+_SOURCE_SUFFIX = "GEOLOCATION"
 
 # Distance threshold (km) above which a transaction is flagged as anomalous.
 _ANOMALY_DISTANCE_KM = 500.0
@@ -63,14 +63,16 @@ def check_geolocation(
         - is_anomalous=True when distance exceeds _ANOMALY_DISTANCE_KM.
         - is_anomalous=None when coordinates are unavailable (distinct from False).
     """
-    account = get_account(account_id)
+    store = get_store()
+    _SOURCE = f"{store.source_prefix}_{_SOURCE_SUFFIX}"
+    account = store.get_account(account_id)
     if account is None:
         return GeolocationResponse(
             source=_SOURCE,
             source_mode=SourceMode.MOCK,
             status=EvidenceStatus.NOT_FOUND,
             requested_entity_id=account_id,
-            warnings=[f"Account '{account_id}' not found in mock geolocation fixture."],
+            warnings=[f"Account '{account_id}' not found in geolocation records."],
         )
 
     reg_lat = account.get("registered_latitude")
@@ -110,7 +112,7 @@ def check_geolocation(
         is_anomalous=is_anomalous,
         anomaly_reason=anomaly_reason,
         location_data_available=location_available,
-        synthetic_notice=SYNTHETIC_DATA_NOTICE,
+        synthetic_notice=store.synthetic_notice,
     )
 
     warnings = []

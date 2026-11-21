@@ -248,9 +248,9 @@ class TestMuleLikeLive:
             _make_canonical_tx(f"{p}IN{i}", f"{p}SRC{i}", mule, "400", ts_delta_minutes=i * 5)
             for i in range(2)
         ]
-        # 2 outgoing destinations
+        # 2 outgoing destinations, passing 600/800 = 75% onward (v2 pass-through rule)
         out_txns = [
-            _make_canonical_tx(f"{p}OUT{i}", mule, f"{p}DST{i}", "180", ts_delta_minutes=10 + i * 5)
+            _make_canonical_tx(f"{p}OUT{i}", mule, f"{p}DST{i}", "300", ts_delta_minutes=10 + i * 5)
             for i in range(2)
         ]
         for tx in in_txns + out_txns:
@@ -338,7 +338,7 @@ class TestStructuringLive:
         sender = f"{p}SENDER"
         txns = [
             _make_canonical_tx(
-                f"{p}TX{i}", sender, f"{p}RECV{i}", "800", ts_delta_minutes=i * 120
+                f"{p}TX{i}", sender, f"{p}RECV{i}", "49500", ts_delta_minutes=i * 120
             )
             for i in range(3)  # 3 transfers over 4 hours
         ]

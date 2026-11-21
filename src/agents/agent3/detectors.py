@@ -18,6 +18,15 @@ Rules
 * No detector produces a final fraud determination or risk score.
 * Heuristic scores in [0, 1] are labelled as prototype signals.
 
+Rule version v2 (Phase 9.5)
+---------------------------
+v1 rules were timeless and structural (e.g. "≥3 recipients ever"); on a
+realistically dense graph every account matched. v2 rules are temporal:
+counts are taken within sliding time windows, chains must be time-ordered
+with amount continuity, and clusters are time-ordered cycles. The analyser
+passes only rows inside the analysis window around the investigated
+transaction.
+
 Design pattern
 --------------
 Each public detector function has the signature:
@@ -36,7 +45,8 @@ and passes it in.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .config import Agent3Config
@@ -49,7 +59,7 @@ from .output_schema import (
 
 logger = logging.getLogger(__name__)
 
-_RULE_VERSION = "v1"
+_RULE_VERSION = "v2"
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -115,9 +125,53 @@ def _dominant_currency(rows: list[dict]) -> Optional[str]:
     return max(set(currencies), key=currencies.count)
 
 
+
+def _ts_sorted(rows: list[dict]) -> list[tuple[dict, datetime]]:
+    """Rows with a parseable timestamp, oldest first (rows without are dropped)."""
+    out = [(r, _parse_ts(r.get("timestamp_utc"))) for r in rows]
+    out = [(r, t) for r, t in out if t is not None]
+    out.sort(key=lambda x: x[1])
+    return out
+
+
+def _best_window(
+    rows: list[tuple[dict, datetime]], window_secs: float, key: str
+) -> list[tuple[dict, datetime]]:
+    """Window (≤ window_secs) containing the most distinct values of `key`."""
+    best: list[tuple[dict, datetime]] = []
+    best_n = 0
+    j = 0
+    for i in range(len(rows)):
+        while rows[i][1].timestamp() - rows[j][1].timestamp() > window_secs:
+            j += 1
+        group = rows[j: i + 1]
+        n = len({r.get(key) for r, _ in group if r.get(key)})
+        if n > best_n:
+            best_n, best = n, group
+    return best
+
+
 # ---------------------------------------------------------------------------
-# Detector A: Layering
+# Detector A: Layering (time-ordered chain with amount continuity)
 # ---------------------------------------------------------------------------
+
+def _valid_chain(transfers: list[dict], config: Agent3Config) -> tuple[bool, Optional[float]]:
+    """Check time order, per-hop gap, amount retention and total elapsed."""
+    times = [_parse_ts(t.get("timestamp_utc")) for t in transfers]
+    if any(t is None for t in times):
+        return False, None
+    max_gap = config.layering_hop_max_gap_hours * 3600
+    for i in range(1, len(transfers)):
+        gap = (times[i] - times[i - 1]).total_seconds()
+        if gap <= 0 or gap > max_gap:
+            return False, None
+        prev_amt, amt = transfers[i - 1].get("amount"), transfers[i].get("amount")
+        if prev_amt is None or amt is None or amt < config.layering_min_amount_retention * prev_amt:
+            return False, None
+    elapsed_h = (times[-1] - times[0]).total_seconds() / 3600
+    if elapsed_h > config.layering_max_elapsed_hours:
+        return False, None
+    return True, elapsed_h
 
 
 def detect_layering(
@@ -126,106 +180,112 @@ def detect_layering(
     config: Agent3Config,
 ) -> list[NetworkFinding]:
     """
-    Detect layering — multi-hop chains of ≥ config.min_layering_hops hops.
+    Detect layering — a time-ordered chain of transfers through intermediaries.
 
-    ``paths`` is a list of path dicts from GraphQueryHelper.get_transfer_path()
-    or Agent 3's own bounded multi-hop query.
-
-    Detection rule: AGENT3.LAYERING.v1
-    Threshold: path must contain ≥ min_layering_hops hops (default 2).
-    If timestamps are present, elapsed_hours is reported for context.
-
-    This is a structural indicator. A chain meeting the threshold is
-    flagged regardless of amounts — the investigator reviews the evidence.
+    Detection rule: AGENT3.LAYERING.v2
+    ``paths`` are candidate chains ({node_ids, transfers}) through the
+    investigated transfer. A chain is flagged when ALL hold:
+      * hop count ≥ min_layering_hops
+      * every timestamp present and strictly increasing
+      * each hop within layering_hop_max_gap_hours of the previous
+      * each hop amount ≥ layering_min_amount_retention × previous hop
+      * first→last elapsed ≤ layering_max_elapsed_hours
+    Sub-chains of a reported chain are suppressed. Missing timestamps fail the
+    rule (no ordering is invented).
     """
-    if not paths:
-        return []
-
-    findings: list[NetworkFinding] = []
-
-    for path in paths:
-        node_ids: list[str] = path.get("node_ids", [])
-        transfers_raw: list[dict] = path.get("transfers", [])
-        path_length: int = path.get("path_length", len(node_ids) - 1)
-
-        if path_length < config.min_layering_hops:
+    valid: list[tuple[dict, float]] = []
+    for path in paths or []:
+        node_ids = path.get("node_ids", [])
+        transfers = path.get("transfers", [])
+        hops = len(transfers)
+        if hops < config.min_layering_hops or len(node_ids) != hops + 1:
             continue
+        if len(set(node_ids)) != len(node_ids):
+            continue  # revisits are cycles, handled by the cluster detector
+        ok, elapsed_h = _valid_chain(transfers, config)
+        if ok:
+            valid.append((path, elapsed_h))
 
-        # Build TransferRef list — paths contain abbreviated transfer dicts
-        transfer_refs = []
-        for i, t in enumerate(transfers_raw):
-            from_id = node_ids[i] if i < len(node_ids) else None
-            to_id = node_ids[i + 1] if (i + 1) < len(node_ids) else None
-            transfer_refs.append(TransferRef(
+    # Longest first; drop chains whose transfers are a subset of a kept chain.
+    valid.sort(key=lambda x: -len(x[0]["transfers"]))
+    kept: list[tuple[dict, float]] = []
+    kept_sets: list[set] = []
+    for path, el in valid:
+        ids = {t.get("tx_graph_id") for t in path["transfers"]}
+        if any(ids <= k for k in kept_sets):
+            continue
+        kept.append((path, el))
+        kept_sets.append(ids)
+        if len(kept) >= config.layering_path_limit:
+            break
+
+    findings = []
+    for path, elapsed_h in kept:
+        node_ids, transfers_raw = path["node_ids"], path["transfers"]
+        hops = len(transfers_raw)
+        refs = [
+            TransferRef(
                 tx_graph_id=t.get("tx_graph_id"),
-                from_account_id=from_id,
-                to_account_id=to_id,
+                from_account_id=node_ids[i],
+                to_account_id=node_ids[i + 1],
                 amount=t.get("amount"),
                 amount_str=t.get("amount_str"),
                 currency=t.get("currency"),
                 timestamp_utc=t.get("timestamp_utc"),
                 channel=t.get("channel"),
-            ))
-
-        # Elapsed time across the chain
-        first_ts = transfers_raw[0].get("timestamp_utc") if transfers_raw else None
-        last_ts = transfers_raw[-1].get("timestamp_utc") if transfers_raw else None
-        elapsed_h = _elapsed_hours(first_ts, last_ts)
-
-        lp = LayeringPath(
-            account_ids=node_ids,
-            hop_count=path_length,
-            transfers=transfer_refs,
-            elapsed_hours=elapsed_h,
-        )
-
-        # Heuristic score: longer chain → higher score, rapid → higher
-        base = min(path_length / config.max_layering_hops, 1.0)
-        if elapsed_h is not None and elapsed_h < config.layering_max_elapsed_hours / 3:
-            base = min(base + 0.2, 1.0)
-
-        intermediaries = node_ids[1:-1] if len(node_ids) > 2 else []
-        intermediary_str = (
-            f" through {len(intermediaries)} intermediar{'y' if len(intermediaries)==1 else 'ies'} "
-            f"({', '.join(intermediaries[:3])}{'...' if len(intermediaries) > 3 else ''})"
-            if intermediaries else ""
-        )
-        elapsed_str = (
-            f" in {elapsed_h:.1f}h" if elapsed_h is not None else " (timestamps missing)"
-        )
-
+            )
+            for i, t in enumerate(transfers_raw)
+        ]
+        retention = (transfers_raw[-1]["amount"] / transfers_raw[0]["amount"]) if transfers_raw[0].get("amount") else None
+        score = min(0.5 + 0.1 * (hops - config.min_layering_hops + 1)
+                    + (0.2 if elapsed_h < config.layering_max_elapsed_hours / 6 else 0.0), 1.0)
+        inter = node_ids[1:-1]
         findings.append(NetworkFinding(
             pattern_type=NetworkPatternType.LAYERING,
             rule_id=f"AGENT3.LAYERING.{_RULE_VERSION}",
             subject_account_id=subject_id,
             related_account_ids=list(node_ids),
-            supporting_transfers=transfer_refs,
-            layering_paths=[lp],
-            transfer_count=len(transfer_refs),
-            hop_count=path_length,
-            total_amount=_total_amount(transfers_raw) if transfers_raw else None,
-            currency=_dominant_currency(transfers_raw) if transfers_raw else None,
-            elapsed_minutes=elapsed_h * 60 if elapsed_h is not None else None,
-            heuristic_score=round(base, 3),
+            supporting_transfers=refs,
+            layering_paths=[LayeringPath(account_ids=node_ids, hop_count=hops,
+                                         transfers=refs, elapsed_hours=round(elapsed_h, 3))],
+            transfer_count=hops,
+            hop_count=hops,
+            total_amount=_total_amount(transfers_raw),
+            currency=_dominant_currency(transfers_raw),
+            elapsed_minutes=round(elapsed_h * 60, 2),
+            heuristic_score=round(score, 3),
             explanation=(
-                f"Funds moved {path_length} hop(s){intermediary_str}{elapsed_str} "
-                f"from {node_ids[0]} to {node_ids[-1]}. "
-                f"This is a structural network indicator (prototype heuristic). "
-                f"Requires ≥{config.min_layering_hops} hops to flag."
+                f"Funds moved {hops} time-ordered hops from {node_ids[0]} to {node_ids[-1]} "
+                f"through {len(inter)} intermediar{'y' if len(inter) == 1 else 'ies'} "
+                f"({', '.join(inter[:3])}{'...' if len(inter) > 3 else ''}) in {elapsed_h:.1f}h; "
+                + (f"the final hop carried {retention:.0%} of the first. " if retention else "")
+                + "Each hop followed the previous within "
+                f"{config.layering_hop_max_gap_hours:g}h with ≥{config.layering_min_amount_retention:.0%} "
+                "amount retention. Prototype heuristic indicator, not a fraud determination."
             ),
             detection_parameters={
                 "min_layering_hops": config.min_layering_hops,
                 "max_layering_hops": config.max_layering_hops,
                 "layering_max_elapsed_hours": config.layering_max_elapsed_hours,
+                "layering_hop_max_gap_hours": config.layering_hop_max_gap_hours,
+                "layering_min_amount_retention": config.layering_min_amount_retention,
             },
         ))
-
     return findings
 
 
 # ---------------------------------------------------------------------------
-# Detector B: Structuring
+# Detector B: Structuring (just-below-round-amount transfers in a window)
 # ---------------------------------------------------------------------------
+
+def _near_below_round(amount: Optional[float], config: Agent3Config) -> bool:
+    if amount is None or amount <= 0:
+        return False
+    unit = config.structuring_round_unit
+    ceiling = math.ceil(amount / unit) * unit
+    if ceiling == amount:
+        return False  # exactly round is not "just below"
+    return amount >= ceiling * (1 - config.structuring_proximity_pct)
 
 
 def detect_structuring(
@@ -234,230 +294,115 @@ def detect_structuring(
     config: Agent3Config,
 ) -> list[NetworkFinding]:
     """
-    Detect structuring-like behaviour — repeated transfers within a time window.
+    Detect structuring-like splitting.
 
-    Detection rule: AGENT3.STRUCTURING.v1
-    Prototype heuristic: ≥ structuring_min_transfers outgoing transfers from
-    the same sender within structuring_window_hours.
+    Detection rule: AGENT3.STRUCTURING.v2
+    ≥ structuring_min_transfers outgoing transfers within
+    structuring_window_hours whose amounts each sit just below a multiple of
+    structuring_round_unit (within structuring_proximity_pct).
 
-    IMPORTANT: This is a PROTOTYPE ENGINEERING HEURISTIC. It is NOT based on
-    any regulatory reporting threshold (e.g., ₹50,000, $10,000, or any PMLA/
-    FinCEN/FATF figure). No transfer amount is compared to a legal threshold.
-
-    A single small transfer is never flagged; the pattern requires repeated
-    frequency within the configured window.
+    PROTOTYPE ENGINEERING HEURISTIC — the round unit is configurable and is
+    NOT a regulatory reporting threshold.
     """
-    if len(outgoing) < config.structuring_min_transfers:
+    candidates = [(r, t) for r, t in _ts_sorted(outgoing) if _near_below_round(r.get("amount"), config)]
+    if len(candidates) < config.structuring_min_transfers:
         return []
-
-    # Sort by timestamp (rows with no timestamp are grouped separately)
-    with_ts = [(r, _parse_ts(r.get("timestamp_utc"))) for r in outgoing]
-    timestamped = [(r, dt) for r, dt in with_ts if dt is not None]
-    missing_ts = [r for r, dt in with_ts if dt is None]
-
-    window_secs = config.structuring_window_hours * 3600
-    findings: list[NetworkFinding] = []
-
-    if timestamped:
-        timestamped.sort(key=lambda x: x[1])
-        # Sliding window: find any group of ≥ min_transfers within the window
-        n = len(timestamped)
-        i = 0
-        seen_windows: set[tuple[str, ...]] = set()
-
-        while i < n:
-            group = [timestamped[i]]
-            j = i + 1
-            while j < n:
-                elapsed = (timestamped[j][1] - timestamped[i][1]).total_seconds()
-                if elapsed <= window_secs:
-                    group.append(timestamped[j])
-                    j += 1
-                else:
-                    break
-
-            if len(group) >= config.structuring_min_transfers:
-                key = tuple(sorted(r.get("tx_graph_id", "") for r, _ in group))
-                if key not in seen_windows:
-                    seen_windows.add(key)
-                    rows = [r for r, _ in group]
-                    transfer_refs = [
-                        _row_to_transfer_ref(r, from_id=subject_id, to_id=r.get("counterpart_id"))
-                        for r in rows
-                    ]
-                    total = _total_amount(rows)
-                    elapsed_h = (group[-1][1] - group[0][1]).total_seconds() / 3600
-                    distinct_recipients = len(set(r.get("counterpart_id") for r in rows if r.get("counterpart_id")))
-                    score = min(len(rows) / (config.structuring_min_transfers * 3), 1.0)
-
-                    findings.append(NetworkFinding(
-                        pattern_type=NetworkPatternType.STRUCTURING,
-                        rule_id=f"AGENT3.STRUCTURING.{_RULE_VERSION}",
-                        subject_account_id=subject_id,
-                        related_account_ids=list(
-                            {r.get("counterpart_id") for r in rows if r.get("counterpart_id")}
-                        ),
-                        supporting_transfers=transfer_refs,
-                        transfer_count=len(rows),
-                        distinct_counterparty_count=distinct_recipients,
-                        total_amount=total,
-                        currency=_dominant_currency(rows),
-                        elapsed_minutes=elapsed_h * 60,
-                        heuristic_score=round(score, 3),
-                        explanation=(
-                            f"{len(rows)} outgoing transfers within {elapsed_h:.1f}h "
-                            f"(window: {config.structuring_window_hours}h) from {subject_id}. "
-                            f"Prototype structuring heuristic: ≥{config.structuring_min_transfers} "
-                            f"transfers in window. NOT based on a legal reporting threshold."
-                        ),
-                        detection_parameters={
-                            "structuring_min_transfers": config.structuring_min_transfers,
-                            "structuring_window_hours": config.structuring_window_hours,
-                        },
-                    ))
-            i += 1
-
-    elif len(missing_ts) >= config.structuring_min_transfers:
-        # Can't window by time — flag if enough transfers exist without ordering
-        transfer_refs = [
-            _row_to_transfer_ref(r, from_id=subject_id, to_id=r.get("counterpart_id"))
-            for r in missing_ts
-        ]
-        findings.append(NetworkFinding(
-            pattern_type=NetworkPatternType.STRUCTURING,
-            rule_id=f"AGENT3.STRUCTURING.{_RULE_VERSION}",
-            subject_account_id=subject_id,
-            related_account_ids=list(
-                {r.get("counterpart_id") for r in missing_ts if r.get("counterpart_id")}
-            ),
-            supporting_transfers=transfer_refs,
-            transfer_count=len(missing_ts),
-            total_amount=_total_amount(missing_ts),
-            currency=_dominant_currency(missing_ts),
-            heuristic_score=0.3,
-            explanation=(
-                f"{len(missing_ts)} outgoing transfers from {subject_id} (timestamps missing; "
-                f"cannot verify time window). Prototype structuring heuristic flagged "
-                f"≥{config.structuring_min_transfers} transfers. NOT a legal determination."
-            ),
-            detection_parameters={
-                "structuring_min_transfers": config.structuring_min_transfers,
-                "structuring_window_hours": config.structuring_window_hours,
-                "timestamp_available": False,
-            },
-        ))
-
-    return findings
-
-
-# ---------------------------------------------------------------------------
-# Detector C: Fan-in
-# ---------------------------------------------------------------------------
-
-
-def detect_fan_in(
-    incoming: list[dict],
-    subject_id: str,
-    config: Agent3Config,
-) -> list[NetworkFinding]:
-    """
-    Detect fan-in — multiple distinct sources sending to one recipient.
-
-    Detection rule: AGENT3.FAN_IN.v1
-    Threshold: ≥ fan_in_min_sources distinct source accounts.
-    """
-    distinct_sources = {
-        r.get("counterpart_id")
-        for r in incoming
-        if r.get("counterpart_id")
-    }
-    if len(distinct_sources) < config.fan_in_min_sources:
+    window = config.structuring_window_hours * 3600
+    best: list[tuple[dict, datetime]] = []
+    j = 0
+    for i in range(len(candidates)):
+        while candidates[i][1].timestamp() - candidates[j][1].timestamp() > window:
+            j += 1
+        if i - j + 1 > len(best):
+            best = candidates[j: i + 1]
+    if len(best) < config.structuring_min_transfers:
         return []
-
-    transfer_refs = [
-        _row_to_transfer_ref(r, from_id=r.get("counterpart_id"), to_id=subject_id)
-        for r in incoming
-    ]
-    total = _total_amount(incoming)
-    score = min(len(distinct_sources) / (config.fan_in_min_sources * 3), 1.0)
-
+    rows = [r for r, _ in best]
+    elapsed_h = (best[-1][1] - best[0][1]).total_seconds() / 3600
+    recipients = {r.get("counterpart_id") for r in rows if r.get("counterpart_id")}
     return [NetworkFinding(
-        pattern_type=NetworkPatternType.FAN_IN,
-        rule_id=f"AGENT3.FAN_IN.{_RULE_VERSION}",
+        pattern_type=NetworkPatternType.STRUCTURING,
+        rule_id=f"AGENT3.STRUCTURING.{_RULE_VERSION}",
         subject_account_id=subject_id,
-        related_account_ids=list(distinct_sources),
-        supporting_transfers=transfer_refs,
-        transfer_count=len(incoming),
-        distinct_counterparty_count=len(distinct_sources),
-        total_amount=total,
-        currency=_dominant_currency(incoming),
-        heuristic_score=round(score, 3),
+        related_account_ids=sorted(recipients),
+        supporting_transfers=[_row_to_transfer_ref(r, from_id=subject_id, to_id=r.get("counterpart_id")) for r in rows],
+        transfer_count=len(rows),
+        distinct_counterparty_count=len(recipients),
+        total_amount=_total_amount(rows),
+        currency=_dominant_currency(rows),
+        elapsed_minutes=round(elapsed_h * 60, 2),
+        heuristic_score=round(min(len(rows) / (config.structuring_min_transfers * 2), 1.0), 3),
         explanation=(
-            f"{subject_id} received {len(incoming)} transfers from "
-            f"{len(distinct_sources)} distinct sources "
-            f"(threshold: ≥{config.fan_in_min_sources}). "
-            f"Fan-in structural indicator. Not a fraud determination."
+            f"{subject_id} made {len(rows)} transfers to {len(recipients)} recipient(s) within "
+            f"{elapsed_h:.1f}h, each just below a multiple of {config.structuring_round_unit:,.0f} "
+            f"(within {config.structuring_proximity_pct:.0%}). Structuring-like splitting indicator "
+            "(prototype heuristic; not a regulatory threshold)."
         ),
-        detection_parameters={"fan_in_min_sources": config.fan_in_min_sources},
+        detection_parameters={
+            "structuring_min_transfers": config.structuring_min_transfers,
+            "structuring_window_hours": config.structuring_window_hours,
+            "structuring_round_unit": config.structuring_round_unit,
+            "structuring_proximity_pct": config.structuring_proximity_pct,
+        },
     )]
 
 
 # ---------------------------------------------------------------------------
-# Detector D: Fan-out
+# Detectors C/D: Fan-in / Fan-out (distinct counterparties in a window)
 # ---------------------------------------------------------------------------
 
-
-def detect_fan_out(
-    outgoing: list[dict],
-    subject_id: str,
-    config: Agent3Config,
-) -> list[NetworkFinding]:
-    """
-    Detect fan-out — one sender distributing to multiple distinct recipients.
-
-    Detection rule: AGENT3.FAN_OUT.v1
-    Threshold: ≥ fan_out_min_destinations distinct recipient accounts.
-    """
-    distinct_dests = {
-        r.get("counterpart_id")
-        for r in outgoing
-        if r.get("counterpart_id")
-    }
-    if len(distinct_dests) < config.fan_out_min_destinations:
+def _fan(rows: list[dict], subject_id: str, config: Agent3Config, incoming: bool) -> list[NetworkFinding]:
+    threshold = config.fan_in_min_sources if incoming else config.fan_out_min_destinations
+    window = _best_window(_ts_sorted(rows), config.fan_window_hours * 3600, "counterpart_id")
+    parties = {r.get("counterpart_id") for r, _ in window if r.get("counterpart_id")}
+    if len(parties) < threshold:
         return []
-
-    transfer_refs = [
-        _row_to_transfer_ref(r, from_id=subject_id, to_id=r.get("counterpart_id"))
-        for r in outgoing
-    ]
-    total = _total_amount(outgoing)
-    score = min(len(distinct_dests) / (config.fan_out_min_destinations * 3), 1.0)
-
+    group = [r for r, _ in window]
+    elapsed_h = (window[-1][1] - window[0][1]).total_seconds() / 3600
+    kind = NetworkPatternType.FAN_IN if incoming else NetworkPatternType.FAN_OUT
+    verb = "received transfers from" if incoming else "sent transfers to"
+    noun = "sources" if incoming else "recipients"
     return [NetworkFinding(
-        pattern_type=NetworkPatternType.FAN_OUT,
-        rule_id=f"AGENT3.FAN_OUT.{_RULE_VERSION}",
+        pattern_type=kind,
+        rule_id=f"AGENT3.{kind.value}.{_RULE_VERSION}",
         subject_account_id=subject_id,
-        related_account_ids=list(distinct_dests),
-        supporting_transfers=transfer_refs,
-        transfer_count=len(outgoing),
-        distinct_counterparty_count=len(distinct_dests),
-        total_amount=total,
-        currency=_dominant_currency(outgoing),
-        heuristic_score=round(score, 3),
+        related_account_ids=sorted(parties),
+        supporting_transfers=[
+            _row_to_transfer_ref(r, from_id=r.get("counterpart_id") if incoming else subject_id,
+                                 to_id=subject_id if incoming else r.get("counterpart_id"))
+            for r in group
+        ],
+        transfer_count=len(group),
+        distinct_counterparty_count=len(parties),
+        total_amount=_total_amount(group),
+        currency=_dominant_currency(group),
+        elapsed_minutes=round(elapsed_h * 60, 2),
+        heuristic_score=round(min(len(parties) / (threshold * 2), 1.0), 3),
         explanation=(
-            f"{subject_id} sent {len(outgoing)} transfers to "
-            f"{len(distinct_dests)} distinct recipients "
-            f"(threshold: ≥{config.fan_out_min_destinations}). "
-            f"Fan-out structural indicator. Not a fraud determination."
+            f"{subject_id} {verb} {len(parties)} distinct {noun} within {elapsed_h:.1f}h "
+            f"(threshold: ≥{threshold} within {config.fan_window_hours:g}h). "
+            f"{'Fan-in' if incoming else 'Fan-out'} indicator; not a fraud determination."
         ),
-        detection_parameters={"fan_out_min_destinations": config.fan_out_min_destinations},
+        detection_parameters={
+            ("fan_in_min_sources" if incoming else "fan_out_min_destinations"): threshold,
+            "fan_window_hours": config.fan_window_hours,
+        },
     )]
 
 
-# ---------------------------------------------------------------------------
-# Detector E: Mule-like behavior
-# ---------------------------------------------------------------------------
+def detect_fan_in(incoming: list[dict], subject_id: str, config: Agent3Config) -> list[NetworkFinding]:
+    """Detection rule AGENT3.FAN_IN.v2: ≥ fan_in_min_sources distinct sources within fan_window_hours."""
+    return _fan(incoming, subject_id, config, incoming=True)
 
+
+def detect_fan_out(outgoing: list[dict], subject_id: str, config: Agent3Config) -> list[NetworkFinding]:
+    """Detection rule AGENT3.FAN_OUT.v2: ≥ fan_out_min_destinations distinct recipients within fan_window_hours."""
+    return _fan(outgoing, subject_id, config, incoming=False)
+
+
+# ---------------------------------------------------------------------------
+# Detector E: Mule-like pass-through
+# ---------------------------------------------------------------------------
 
 def detect_mule_like(
     incoming: list[dict],
@@ -466,78 +411,65 @@ def detect_mule_like(
     config: Agent3Config,
 ) -> list[NetworkFinding]:
     """
-    Detect heuristic mule-like account behavior.
+    Detect mule-like pass-through behaviour.
 
-    Detection rule: AGENT3.MULE_LIKE.v1
-    Conditions (ALL must be met):
-      1. ≥ mule_min_incoming_sources distinct incoming source accounts.
-      2. ≥ mule_min_outgoing_destinations distinct outgoing destinations.
-      3. Both incoming and outgoing transfers exist.
-
-    IMPORTANT: This is labelled as a HEURISTIC INDICATOR of POSSIBLE
-    mule-like behavior. It does NOT identify confirmed money mules.
+    Detection rule: AGENT3.MULE_LIKE.v2
+    Within some window of mule_window_hours starting at an incoming transfer:
+      1. ≥ mule_min_incoming_sources distinct sources sent funds in;
+      2. ≥ mule_min_outgoing_destinations destinations received funds out
+         AFTER the first incoming transfer;
+      3. total out ≥ mule_min_passthrough_ratio × total in.
+    HEURISTIC INDICATOR of possible mule-like behaviour, not an identification.
     """
-    distinct_sources = {
-        r.get("counterpart_id") for r in incoming if r.get("counterpart_id")
-    }
-    distinct_dests = {
-        r.get("counterpart_id") for r in outgoing if r.get("counterpart_id")
-    }
-
-    if (
-        len(distinct_sources) < config.mule_min_incoming_sources
-        or len(distinct_dests) < config.mule_min_outgoing_destinations
-    ):
+    ins, outs = _ts_sorted(incoming), _ts_sorted(outgoing)
+    if not ins or not outs:
         return []
-
-    in_refs = [
-        _row_to_transfer_ref(r, from_id=r.get("counterpart_id"), to_id=subject_id)
-        for r in incoming
-    ]
-    out_refs = [
-        _row_to_transfer_ref(r, from_id=subject_id, to_id=r.get("counterpart_id"))
-        for r in outgoing
-    ]
-    all_refs = in_refs + out_refs
-
-    total_in = _total_amount(incoming) or 0.0
-    total_out = _total_amount(outgoing) or 0.0
-    score = min(
-        (len(distinct_sources) + len(distinct_dests))
-        / ((config.mule_min_incoming_sources + config.mule_min_outgoing_destinations) * 2),
-        1.0,
-    )
-
-    return [NetworkFinding(
-        pattern_type=NetworkPatternType.MULE_LIKE,
-        rule_id=f"AGENT3.MULE_LIKE.{_RULE_VERSION}",
-        subject_account_id=subject_id,
-        related_account_ids=list(distinct_sources | distinct_dests),
-        supporting_transfers=all_refs,
-        transfer_count=len(all_refs),
-        distinct_counterparty_count=len(distinct_sources | distinct_dests),
-        total_amount=total_in + total_out,
-        currency=_dominant_currency(incoming + outgoing),
-        heuristic_score=round(score, 3),
-        explanation=(
-            f"{subject_id} received from {len(distinct_sources)} distinct source(s) "
-            f"(threshold: ≥{config.mule_min_incoming_sources}) "
-            f"and sent to {len(distinct_dests)} distinct destination(s) "
-            f"(threshold: ≥{config.mule_min_outgoing_destinations}). "
-            f"Heuristic indicator of POSSIBLE mule-like behavior. "
-            f"NOT a confirmed identification of a money mule."
-        ),
-        detection_parameters={
-            "mule_min_incoming_sources": config.mule_min_incoming_sources,
-            "mule_min_outgoing_destinations": config.mule_min_outgoing_destinations,
-        },
-    )]
+    window = timedelta(hours=config.mule_window_hours)
+    for i, (_, start) in enumerate(ins):
+        end = start + window
+        w_in = [r for r, t in ins[i:] if t <= end]
+        w_out = [r for r, t in outs if start < t <= end]
+        sources = {r.get("counterpart_id") for r in w_in if r.get("counterpart_id")}
+        dests = {r.get("counterpart_id") for r in w_out if r.get("counterpart_id")}
+        total_in = _total_amount(w_in) or 0.0
+        total_out = _total_amount(w_out) or 0.0
+        if (len(sources) >= config.mule_min_incoming_sources
+                and len(dests) >= config.mule_min_outgoing_destinations
+                and total_in > 0
+                and total_out >= config.mule_min_passthrough_ratio * total_in):
+            ratio = total_out / total_in
+            refs = ([_row_to_transfer_ref(r, from_id=r.get("counterpart_id"), to_id=subject_id) for r in w_in]
+                    + [_row_to_transfer_ref(r, from_id=subject_id, to_id=r.get("counterpart_id")) for r in w_out])
+            return [NetworkFinding(
+                pattern_type=NetworkPatternType.MULE_LIKE,
+                rule_id=f"AGENT3.MULE_LIKE.{_RULE_VERSION}",
+                subject_account_id=subject_id,
+                related_account_ids=sorted(sources | dests),
+                supporting_transfers=refs,
+                transfer_count=len(refs),
+                distinct_counterparty_count=len(sources | dests),
+                total_amount=total_in + total_out,
+                currency=_dominant_currency(w_in + w_out),
+                heuristic_score=round(min(0.5 + 0.1 * len(sources) + 0.2 * min(ratio, 1.0), 1.0), 3),
+                explanation=(
+                    f"{subject_id} received {total_in:,.2f} from {len(sources)} distinct source(s) and "
+                    f"passed {ratio:.0%} of it ({total_out:,.2f}) to {len(dests)} destination(s) within "
+                    f"{config.mule_window_hours:g}h. Heuristic indicator of POSSIBLE mule-like "
+                    "pass-through; NOT a confirmed identification of a money mule."
+                ),
+                detection_parameters={
+                    "mule_min_incoming_sources": config.mule_min_incoming_sources,
+                    "mule_min_outgoing_destinations": config.mule_min_outgoing_destinations,
+                    "mule_window_hours": config.mule_window_hours,
+                    "mule_min_passthrough_ratio": config.mule_min_passthrough_ratio,
+                },
+            )]
+    return []
 
 
 # ---------------------------------------------------------------------------
 # Detector F: Rapid forwarding
 # ---------------------------------------------------------------------------
-
 
 def detect_rapid_forwarding(
     incoming: list[dict],
@@ -546,212 +478,144 @@ def detect_rapid_forwarding(
     config: Agent3Config,
 ) -> list[NetworkFinding]:
     """
-    Detect rapid forwarding — outgoing transfers shortly after incoming ones.
+    Detect rapid forwarding.
 
-    Detection rule: AGENT3.RAPID_FORWARDING.v1
-    Threshold: any (incoming, outgoing) pair where the outgoing timestamp
-    follows the incoming by ≤ rapid_forwarding_window_minutes.
-
-    Requires timestamps on both transfers. Pairs with missing timestamps
-    are excluded and reported in the warning rather than silently treated
-    as evidence.
-
-    Multiple independent forwarding events are returned as separate findings.
+    Detection rule: AGENT3.RAPID_FORWARDING.v2
+    An outgoing transfer within rapid_forwarding_window_minutes after an
+    incoming transfer, carrying ≥ rapid_forwarding_min_ratio of its amount.
+    All qualifying pairs for the subject are reported in ONE finding.
     """
-    if not incoming or not outgoing:
+    ins, outs = _ts_sorted(incoming), _ts_sorted(outgoing)
+    pairs = []
+    used_out: set = set()
+    for in_row, in_ts in ins:
+        for out_row, out_ts in outs:
+            key = out_row.get("tx_graph_id")
+            if key in used_out:
+                continue
+            mins = (out_ts - in_ts).total_seconds() / 60
+            if mins <= 0 or mins > config.rapid_forwarding_window_minutes:
+                continue
+            in_amt, out_amt = in_row.get("amount"), out_row.get("amount")
+            if not in_amt or out_amt is None or out_amt < config.rapid_forwarding_min_ratio * in_amt:
+                continue
+            pairs.append((in_row, out_row, mins))
+            used_out.add(key)
+            break
+    if not pairs:
         return []
-
-    findings: list[NetworkFinding] = []
-    reported_pairs: set[tuple[str, str]] = set()
-
-    for in_row in incoming:
-        in_ts_str = in_row.get("timestamp_utc")
-        in_ts = _parse_ts(in_ts_str)
-        if in_ts is None:
-            continue
-
-        for out_row in outgoing:
-            out_ts_str = out_row.get("timestamp_utc")
-            out_ts = _parse_ts(out_ts_str)
-            if out_ts is None:
-                continue
-            if out_ts <= in_ts:
-                continue  # not a forward event
-
-            elapsed = (out_ts - in_ts).total_seconds() / 60.0
-            if elapsed > config.rapid_forwarding_window_minutes:
-                continue
-
-            in_id = in_row.get("tx_graph_id") or in_row.get("raw_record_id", "?")
-            out_id = out_row.get("tx_graph_id") or out_row.get("raw_record_id", "?")
-            pair_key = (in_id, out_id)
-            if pair_key in reported_pairs:
-                continue
-            reported_pairs.add(pair_key)
-
-            in_ref = _row_to_transfer_ref(
-                in_row,
-                from_id=in_row.get("counterpart_id"),
-                to_id=subject_id,
-            )
-            out_ref = _row_to_transfer_ref(
-                out_row,
-                from_id=subject_id,
-                to_id=out_row.get("counterpart_id"),
-            )
-
-            in_amt = in_row.get("amount") or 0.0
-            out_amt = out_row.get("amount") or 0.0
-
-            findings.append(NetworkFinding(
-                pattern_type=NetworkPatternType.RAPID_FORWARDING,
-                rule_id=f"AGENT3.RAPID_FORWARDING.{_RULE_VERSION}",
-                subject_account_id=subject_id,
-                related_account_ids=list(filter(None, [
-                    in_row.get("counterpart_id"),
-                    out_row.get("counterpart_id"),
-                ])),
-                supporting_transfers=[in_ref, out_ref],
-                transfer_count=2,
-                elapsed_minutes=round(elapsed, 2),
-                total_amount=(in_amt + out_amt) if (in_amt or out_amt) else None,
-                currency=in_row.get("currency") or out_row.get("currency"),
-                heuristic_score=round(
-                    1.0 - min(elapsed / config.rapid_forwarding_window_minutes, 1.0),
-                    3,
-                ),
-                explanation=(
-                    f"{subject_id} forwarded funds within {elapsed:.1f} min "
-                    f"of receiving them (threshold: ≤{config.rapid_forwarding_window_minutes}min). "
-                    f"Incoming {in_amt} → outgoing {out_amt}. "
-                    f"Rapid-forwarding structural indicator."
-                ),
-                detection_parameters={
-                    "rapid_forwarding_window_minutes": config.rapid_forwarding_window_minutes,
-                },
-            ))
-
-    return findings
+    refs, related = [], set()
+    for in_row, out_row, _ in pairs:
+        refs.append(_row_to_transfer_ref(in_row, from_id=in_row.get("counterpart_id"), to_id=subject_id))
+        refs.append(_row_to_transfer_ref(out_row, from_id=subject_id, to_id=out_row.get("counterpart_id")))
+        related.update(filter(None, [in_row.get("counterpart_id"), out_row.get("counterpart_id")]))
+    fastest = min(m for *_, m in pairs)
+    return [NetworkFinding(
+        pattern_type=NetworkPatternType.RAPID_FORWARDING,
+        rule_id=f"AGENT3.RAPID_FORWARDING.{_RULE_VERSION}",
+        subject_account_id=subject_id,
+        related_account_ids=sorted(related),
+        supporting_transfers=refs,
+        transfer_count=len(refs),
+        elapsed_minutes=round(fastest, 2),
+        total_amount=_total_amount([p[1] for p in pairs]),
+        currency=_dominant_currency([p[1] for p in pairs]),
+        heuristic_score=round(min(0.4 + 0.15 * len(pairs)
+                                  + 0.3 * (1 - fastest / config.rapid_forwarding_window_minutes), 1.0), 3),
+        explanation=(
+            f"{subject_id} forwarded funds {len(pairs)} time(s) shortly after receiving them "
+            f"(fastest {fastest:.1f} min; threshold ≤{config.rapid_forwarding_window_minutes:g} min and "
+            f"≥{config.rapid_forwarding_min_ratio:.0%} of the incoming amount). Rapid-forwarding indicator."
+        ),
+        detection_parameters={
+            "rapid_forwarding_window_minutes": config.rapid_forwarding_window_minutes,
+            "rapid_forwarding_min_ratio": config.rapid_forwarding_min_ratio,
+        },
+    )]
 
 
 # ---------------------------------------------------------------------------
-# Detector G: Suspicious connected clusters
+# Detector G: Suspicious cluster (time-ordered cycle)
 # ---------------------------------------------------------------------------
-
 
 def detect_suspicious_cluster(
-    cluster_rows: list[dict],
+    cycles: list[dict],
     subject_id: str,
     config: Agent3Config,
 ) -> list[NetworkFinding]:
     """
-    Detect suspicious connected clusters.
+    Detect suspicious clusters as time-ordered transfer cycles.
 
-    ``cluster_rows`` is a list of relationship rows from a bounded neighbourhood
-    query around the subject account — each row has: from_id, to_id, and
-    relationship properties.
-
-    Detection rule: AGENT3.SUSPICIOUS_CLUSTER.v1
-    Conditions (ALL must be met):
-      1. ≥ cluster_min_accounts distinct accounts in the bounded neighbourhood.
-      2. ≥ cluster_min_edges distinct transfer relationships.
-
-    Additional indicators reported (not thresholds):
-      - Presence of cycles (account_id appears as both sender and receiver).
-      - Multiple paths between same account pair.
+    Detection rule: AGENT3.SUSPICIOUS_CLUSTER.v2
+    ``cycles`` are candidate closed walks ({node_ids, transfers}) starting and
+    ending at the subject. A cycle is flagged when:
+      * it has ≥ cluster_min_edges transfers and ≥ cluster_min_accounts
+        distinct accounts (and ≤ cluster_max_cycle_length);
+      * timestamps are present and some rotation of the cycle is strictly
+        increasing (the funds went round once, starting at some member);
+      * first→last elapsed ≤ cluster_window_hours.
+    Distinct account sets are reported once (up to 3 findings).
     """
-    if not cluster_rows:
-        return []
-
-    accounts: set[str] = set()
-    edge_keys: set[str] = set()
-
-    for row in cluster_rows:
-        from_id = row.get("from_id") or row.get("account_id")
-        to_id = row.get("to_id") or row.get("counterpart_id")
-        if from_id:
-            accounts.add(from_id)
-        if to_id:
-            accounts.add(to_id)
-        tx_key = row.get("tx_graph_id") or f"{from_id}:{to_id}"
-        if tx_key:
-            edge_keys.add(tx_key)
-
-    if len(accounts) < config.cluster_min_accounts or len(edge_keys) < config.cluster_min_edges:
-        return []
-
-    # Cycle detection: accounts appearing as both sender and receiver
-    senders = {
-        row.get("from_id") or row.get("account_id")
-        for row in cluster_rows
-        if row.get("from_id") or row.get("account_id")
-    }
-    receivers = {
-        row.get("to_id") or row.get("counterpart_id")
-        for row in cluster_rows
-        if row.get("to_id") or row.get("counterpart_id")
-    }
-    cycle_accounts = senders & receivers
-    has_cycles = bool(cycle_accounts)
-
-    # Multi-path: same (from, to) pair appearing more than once
-    from_to_pairs = [
-        (row.get("from_id") or row.get("account_id"),
-         row.get("to_id") or row.get("counterpart_id"))
-        for row in cluster_rows
-    ]
-    pair_counts = {}
-    for pair in from_to_pairs:
-        pair_counts[pair] = pair_counts.get(pair, 0) + 1
-    has_multi_paths = any(v > 1 for v in pair_counts.values())
-
-    transfer_refs = []
-    for row in cluster_rows:
-        from_id = row.get("from_id") or row.get("account_id")
-        to_id = row.get("to_id") or row.get("counterpart_id")
-        transfer_refs.append(TransferRef(
-            tx_graph_id=row.get("tx_graph_id"),
-            raw_record_id=row.get("raw_record_id"),
-            from_account_id=from_id,
-            to_account_id=to_id,
-            amount=row.get("amount"),
-            amount_str=row.get("amount_str"),
-            currency=row.get("currency"),
-            timestamp_utc=row.get("timestamp_utc"),
-            channel=row.get("channel"),
+    findings, seen = [], set()
+    for c in cycles or []:
+        node_ids, transfers = c.get("node_ids", []), c.get("transfers", [])
+        accounts = set(node_ids)
+        if (len(transfers) < config.cluster_min_edges or len(accounts) < config.cluster_min_accounts
+                or len(transfers) > config.cluster_max_cycle_length
+                or not node_ids or node_ids[0] != node_ids[-1]):
+            continue
+        times = [_parse_ts(t.get("timestamp_utc")) for t in transfers]
+        if any(t is None for t in times):
+            continue
+        # A closed cycle is time-ordered if SOME rotation is strictly
+        # increasing, i.e. at most one "descent" going around the cycle.
+        n = len(times)
+        descents = [i for i in range(n) if times[(i + 1) % n] <= times[i]]
+        if len(descents) != 1:
+            continue
+        start = (descents[0] + 1) % n
+        transfers = transfers[start:] + transfers[:start]
+        times = times[start:] + times[:start]
+        node_ids = node_ids[start:-1] + node_ids[:start] + [node_ids[start]]
+        elapsed_h = (times[-1] - times[0]).total_seconds() / 3600
+        if elapsed_h > config.cluster_window_hours:
+            continue
+        key = frozenset(accounts)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs = [
+            TransferRef(tx_graph_id=t.get("tx_graph_id"), from_account_id=node_ids[i],
+                        to_account_id=node_ids[i + 1], amount=t.get("amount"), amount_str=t.get("amount_str"),
+                        currency=t.get("currency"), timestamp_utc=t.get("timestamp_utc"), channel=t.get("channel"))
+            for i, t in enumerate(transfers)
+        ]
+        findings.append(NetworkFinding(
+            pattern_type=NetworkPatternType.SUSPICIOUS_CLUSTER,
+            rule_id=f"AGENT3.SUSPICIOUS_CLUSTER.{_RULE_VERSION}",
+            subject_account_id=subject_id,
+            related_account_ids=sorted(accounts - {subject_id}),
+            supporting_transfers=refs,
+            transfer_count=len(refs),
+            distinct_counterparty_count=len(accounts),
+            total_amount=_total_amount(transfers),
+            currency=_dominant_currency(transfers),
+            elapsed_minutes=round(elapsed_h * 60, 2),
+            heuristic_score=round(min(0.6 + 0.05 * len(accounts)
+                                      + (0.2 if elapsed_h < config.cluster_window_hours / 3 else 0.0), 1.0), 3),
+            explanation=(
+                f"Funds circulated through {subject_id} in a time-ordered cycle of "
+                f"{len(accounts)} accounts ({' → '.join(node_ids)}) within {elapsed_h:.1f}h "
+                f"(threshold ≤{config.cluster_window_hours:g}h). Circular-flow cluster indicator; "
+                "not a fraud determination."
+            ),
+            detection_parameters={
+                "cluster_min_accounts": config.cluster_min_accounts,
+                "cluster_min_edges": config.cluster_min_edges,
+                "cluster_max_cycle_length": config.cluster_max_cycle_length,
+                "cluster_window_hours": config.cluster_window_hours,
+            },
         ))
-
-    total = _total_amount(cluster_rows)
-    density = len(edge_keys) / max(len(accounts), 1)
-    score = min(density / 3.0 + (0.2 if has_cycles else 0.0) + (0.1 if has_multi_paths else 0.0), 1.0)
-
-    details = []
-    if has_cycles:
-        details.append(f"cycles involving: {', '.join(list(cycle_accounts)[:5])}")
-    if has_multi_paths:
-        details.append("multiple paths between same account pair")
-    detail_str = f" Features: {'; '.join(details)}." if details else ""
-
-    return [NetworkFinding(
-        pattern_type=NetworkPatternType.SUSPICIOUS_CLUSTER,
-        rule_id=f"AGENT3.SUSPICIOUS_CLUSTER.{_RULE_VERSION}",
-        subject_account_id=subject_id,
-        related_account_ids=list(accounts - {subject_id}),
-        supporting_transfers=transfer_refs,
-        transfer_count=len(cluster_rows),
-        distinct_counterparty_count=len(accounts),
-        total_amount=total,
-        currency=_dominant_currency(cluster_rows),
-        heuristic_score=round(score, 3),
-        explanation=(
-            f"Bounded neighbourhood of {subject_id} contains {len(accounts)} accounts "
-            f"and {len(edge_keys)} distinct transfer relationships "
-            f"(thresholds: ≥{config.cluster_min_accounts} accounts, "
-            f"≥{config.cluster_min_edges} edges).{detail_str} "
-            f"Suspicious cluster structural indicator. Not a fraud determination."
-        ),
-        detection_parameters={
-            "cluster_min_accounts": config.cluster_min_accounts,
-            "cluster_min_edges": config.cluster_min_edges,
-        },
-    )]
+        if len(findings) >= 3:
+            break
+    return findings

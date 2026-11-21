@@ -202,6 +202,9 @@ class EvidenceGathererAgent:
         receiver_account_id = transaction.receiver.account_id
         device_id = transaction.device.device_id
         customer_name = transaction.sender.account_name  # For sanctions subject screening
+        # Point-in-time cutoff: evidence history must precede the transaction.
+        as_of = transaction.timestamp
+        name_notes: list[str] = []
 
         tx_lat = transaction.location.latitude
         tx_lon = transaction.location.longitude
@@ -224,7 +227,7 @@ class EvidenceGathererAgent:
 
         # Core Banking — sender account history
         t_banking = asyncio.ensure_future(
-            make_task("CORE_BANKING", get_account_history, sender_account_id)
+            make_task("CORE_BANKING", get_account_history, sender_account_id, as_of)
             if sender_account_id else _missing_id_result("CORE_BANKING", "sender.account_id")
         )
 
@@ -236,7 +239,7 @@ class EvidenceGathererAgent:
 
         # Device registry — sender device
         t_device = asyncio.ensure_future(
-            make_task("DEVICE_REGISTRY", check_device, sender_account_id, device_id)
+            make_task("DEVICE_REGISTRY", check_device, sender_account_id, device_id, as_of)
             if (sender_account_id and device_id) else _missing_id_result(
                 "DEVICE_REGISTRY", "sender.account_id and device.device_id"
             )
@@ -244,15 +247,30 @@ class EvidenceGathererAgent:
 
         # Beneficiary — receiver account
         t_beneficiary = asyncio.ensure_future(
-            make_task("BENEFICIARY", get_beneficiary, receiver_account_id)
+            make_task("BENEFICIARY", get_beneficiary, receiver_account_id, as_of)
             if receiver_account_id else _missing_id_result("BENEFICIARY", "receiver.account_id")
         )
 
-        # Sanctions — by customer name (subject screening)
-        t_sanctions_subject = asyncio.ensure_future(
-            make_task("SANCTIONS_SUBJECT", screen_subject, customer_name)
-            if customer_name else _missing_id_result("SANCTIONS_SUBJECT", "sender.account_name")
-        )
+        # Sanctions — by customer name (subject screening). When the
+        # transaction carries no sender name, screen the KYC customer name.
+        async def _subject_screen():
+            name = customer_name
+            if not name:
+                kyc_res, _ = await t_kyc
+                kyc_data = getattr(kyc_res, "data", None) if kyc_res is not None else None
+                if kyc_data is not None and kyc_data.customer_name:
+                    name = kyc_data.customer_name
+                    name_notes.append(
+                        "Sanctions subject screening used the KYC customer name "
+                        "(transaction carried no sender name)."
+                    )
+            if not name:
+                return await _missing_id_result(
+                    "SANCTIONS_SUBJECT", "sender.account_name or KYC customer_name"
+                )
+            return await make_task("SANCTIONS_SUBJECT", screen_subject, name)
+
+        t_sanctions_subject = asyncio.ensure_future(_subject_screen())
 
         # Sanctions — by account ID
         t_sanctions_account = asyncio.ensure_future(
@@ -302,7 +320,7 @@ class EvidenceGathererAgent:
         failed = [pr.provider_name for pr in all_provider_results if not pr.succeeded]
         succeeded = [pr.provider_name for pr in all_provider_results if pr.succeeded]
 
-        warnings: list[str] = []
+        warnings: list[str] = list(name_notes)
         if not sender_account_id:
             warnings.append(
                 "sender.account_id is missing; Core Banking, KYC, "

@@ -440,9 +440,10 @@ class TestBeneficiarySignal:
         r = sg.extract_new_beneficiary(make_tx(), make_a2(beneficiary_r=beneficiary(prev_fraud=True)), self.cfg)
         assert r.value == 1.0 and "previously flagged" in r.rationale
 
-    def test_no_prior_transactions(self):
+    def test_beneficiary_own_history_not_used(self):
+        """A beneficiary with no history of its own is not, by itself, a new relationship."""
         r = sg.extract_new_beneficiary(make_tx(), make_a2(beneficiary_r=beneficiary(known_tx=0)), self.cfg)
-        assert r.value == 1.0
+        assert r.value == 0.0
 
     def test_young_account_partial(self):
         r = sg.extract_new_beneficiary(make_tx(), make_a2(beneficiary_r=beneficiary(age_days=5)), self.cfg)
@@ -602,7 +603,7 @@ class TestAssessment:
         assert RiskSignal.NETWORK_RISK in out.unavailable_signals
 
     def test_high_score_blocks(self):
-        a2 = make_a2(device_r=device(False), beneficiary_r=beneficiary(known_tx=0), geo_r=geo(True))
+        a2 = make_a2(device_r=device(False), beneficiary_r=beneficiary(prev_fraud=True), geo_r=geo(True))
         out = assess(tx=make_tx(hour=2), a1=make_a1(0.95),
                      a2=a2, a3=make_a3(findings=[finding(score=1.0)]))
         assert out.risk_score >= 75
@@ -652,7 +653,7 @@ class TestAssessment:
 
     def test_override_never_lowers_action(self):
         a2 = make_a2(subj=None, acct=None, device_r=device(False), geo_r=geo(True),
-                     beneficiary_r=beneficiary(known_tx=0))
+                     beneficiary_r=beneficiary(prev_fraud=True))
         out = assess(tx=make_tx(hour=2), a1=make_a1(1.0), a2=a2,
                      a3=make_a3(findings=[finding(score=1.0)]))
         assert out.score_band_action == RecommendedAction.BLOCK

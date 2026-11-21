@@ -2,7 +2,7 @@
 Sentinel AI — Mock Core Banking provider.
 
 Returns synthetic transaction history and account statistics for test accounts.
-All data comes from src/evidence/fixture_data.py (single source of truth).
+All data comes from the active evidence data store (src/evidence/data_store.py).
 """
 
 from __future__ import annotations
@@ -10,12 +10,9 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional
 
-from ..fixture_data import (
-    get_account,
-    get_account_stats,
-    get_transaction_history,
-    SYNTHETIC_DATA_NOTICE,
-)
+from datetime import datetime
+
+from ..data_store import get_store
 from ..schemas import (
     AccountStats,
     CoreBankingData,
@@ -26,10 +23,10 @@ from ..schemas import (
 )
 
 
-_SOURCE = "MOCK_CORE_BANKING"
+_SOURCE_SUFFIX = "CORE_BANKING"
 
 
-def get_account_history(account_id: str) -> CoreBankingResponse:
+def get_account_history(account_id: str, as_of: Optional[datetime] = None) -> CoreBankingResponse:
     """Return synthetic transaction history for the requested account.
 
     Parameters
@@ -41,18 +38,23 @@ def get_account_history(account_id: str) -> CoreBankingResponse:
     -------
     CoreBankingResponse
         status=FOUND when account is known; NOT_FOUND otherwise.
+
+    as_of : optional; history and stats only include transactions strictly
+        before this time (point-in-time evidence). Ignored by the fixture store.
     """
-    account = get_account(account_id)
+    store = get_store()
+    _SOURCE = f"{store.source_prefix}_{_SOURCE_SUFFIX}"
+    account = store.get_account(account_id)
     if account is None:
         return CoreBankingResponse(
             source=_SOURCE,
             source_mode=SourceMode.MOCK,
             status=EvidenceStatus.NOT_FOUND,
             requested_entity_id=account_id,
-            warnings=[f"Account '{account_id}' not found in mock core banking fixture."],
+            warnings=[f"Account '{account_id}' not found in core banking records."],
         )
 
-    raw_history = get_transaction_history(account_id)
+    raw_history = store.get_transaction_history(account_id, as_of)
     transaction_records = [
         TransactionRecord(
             tx_id=tx["tx_id"],
@@ -66,7 +68,7 @@ def get_account_history(account_id: str) -> CoreBankingResponse:
         for tx in raw_history
     ]
 
-    raw_stats = get_account_stats(account_id)
+    raw_stats = store.get_account_stats(account_id, as_of)
     stats = None
     if raw_stats is not None:
         stats = AccountStats(
@@ -84,7 +86,7 @@ def get_account_history(account_id: str) -> CoreBankingResponse:
         bank_name=account.get("bank_name"),
         transaction_history=transaction_records,
         stats=stats,
-        synthetic_notice=SYNTHETIC_DATA_NOTICE,
+        synthetic_notice=store.synthetic_notice,
     )
 
     return CoreBankingResponse(

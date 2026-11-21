@@ -1,18 +1,19 @@
 """
-Sentinel AI — India Synthetic Sample Graph Loader (Phase 7)
+Sentinel AI — India Synthetic Graph Loader
 
-Loads a bounded sample of India Synthetic transactions into Neo4j for
-initial graph verification and Agent 3 development.
+Loads India Synthetic transactions into Neo4j for Agent 3.
 
 Scope
 -----
-* Loads at most MAX_SAMPLE_ROWS rows from the India Synthetic dataset.
-* Requires both transactions_features.csv and transactions_targets.csv
-  to be present at the expected dataset paths (they are git-ignored).
+* Loads ALL rows by default (Phase 9.5); ``--limit N`` loads the first N.
+* Reads ONLY transactions_features.csv. Ground-truth labels
+  (transactions_targets.csv) are never loaded (label firewall).
+* ``--reset-india`` first deletes existing INDIA_SYNTHETIC relationships and
+  orphaned accounts (use after regenerating the dataset).
 * Reports loading statistics without exposing credentials.
-* Designed to be run manually from the project root:
+* Run from the project root:
 
-    python -m scripts.load_india_sample_graph
+    PYTHONPATH=. python scripts/load_india_sample_graph.py [--limit N] [--reset-india]
 
 Environment variables required
 -------------------------------
@@ -41,13 +42,11 @@ logger = logging.getLogger("sentinel.graph.sample_loader")
 # Configuration
 # ---------------------------------------------------------------------------
 
-MAX_SAMPLE_ROWS = 500  # Hard upper bound for Phase 7 initial load
 FEATURES_PATH = Path("dataset/processed/custom_india/transactions_features.csv")
-TARGETS_PATH = Path("dataset/processed/custom_india/transactions_targets.csv")
 
 
-def load_sample() -> None:
-    """Load a bounded sample of India Synthetic transactions into Neo4j."""
+def load_sample(limit: int | None = None, reset_india: bool = False) -> None:
+    """Load India Synthetic transactions (features only) into Neo4j."""
     try:
         import pandas as pd
     except ImportError:
@@ -78,19 +77,9 @@ def load_sample() -> None:
         sys.exit(1)
 
     logger.info("Loading India Synthetic features from: %s", FEATURES_PATH)
-    features_df = pd.read_csv(FEATURES_PATH, nrows=MAX_SAMPLE_ROWS)
-    logger.info("Loaded %d feature rows (max %d).", len(features_df), MAX_SAMPLE_ROWS)
-
-    if TARGETS_PATH.exists():
-        logger.info("Loading targets from: %s", TARGETS_PATH)
-        targets_df = pd.read_csv(TARGETS_PATH)
-        merged_df = features_df.merge(targets_df, on="transaction_id", how="left")
-        logger.info("Merged features + targets: %d rows.", len(merged_df))
-    else:
-        logger.warning(
-            "Targets file not found at %s — loading features only.", TARGETS_PATH
-        )
-        merged_df = features_df
+    features_df = pd.read_csv(FEATURES_PATH, nrows=limit)
+    logger.info("Loaded %d feature rows (limit=%s).", len(features_df), limit)
+    merged_df = features_df  # features only — labels never enter the graph
 
     # ------------------------------------------------------------------
     # Convert to CanonicalTransaction
@@ -129,13 +118,20 @@ def load_sample() -> None:
             mgr.verify_connectivity()
             logger.info("Neo4j connectivity verified.")
 
+            if reset_india:
+                with mgr.session() as s:
+                    s.run("MATCH ()-[r:TRANSFERRED_TO {source_dataset: 'INDIA_SYNTHETIC'}]->() DELETE r")
+                    s.run("MATCH (a:Account {source_dataset: 'INDIA_SYNTHETIC'}) "
+                          "WHERE NOT (a)--() DELETE a")
+                logger.info("Removed existing INDIA_SYNTHETIC graph data.")
+
             # Initialise schema (idempotent)
             schema_mgr = GraphSchemaManager(mgr.session)
             schema_mgr.init_schema()
             logger.info("Graph schema initialised.")
 
             # Load transactions
-            loader = TransactionGraphLoader(mgr.session, batch_size=50)
+            loader = TransactionGraphLoader(mgr.session, batch_size=500)
             result = loader.load_batch(canonical_transactions)
 
             logger.info(
@@ -164,4 +160,11 @@ def load_sample() -> None:
 
 
 if __name__ == "__main__":
-    load_sample()
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--limit", type=int, default=None, help="Load only the first N transactions.")
+    ap.add_argument("--reset-india", action="store_true",
+                    help="Delete existing INDIA_SYNTHETIC graph data before loading.")
+    a = ap.parse_args()
+    load_sample(limit=a.limit, reset_india=a.reset_india)

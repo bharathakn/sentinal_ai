@@ -42,7 +42,7 @@ to be installed.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ...schemas.canonical_transaction import CanonicalTransaction
@@ -53,6 +53,7 @@ from ...graph.connection import (
     Neo4jConnectivityError,
 )
 from ...graph.loader import TransactionGraphLoader
+from ...graph.mapping import make_tx_graph_id
 from ...graph.queries import GraphQueryHelper
 from ...graph.schema import GraphSchemaManager
 
@@ -70,65 +71,109 @@ from .output_schema import (
     Agent3Output,
     Agent3Status,
     NetworkFinding,
+    NetworkPatternType,
 )
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Cluster neighbourhood query
+# v2 temporal queries (Phase 9.5)
 # ---------------------------------------------------------------------------
+# Timestamps are stored as uniform UTC ISO-8601 strings, so window bounds are
+# compared lexicographically. Hop-range integers are interpolated from
+# validated Agent3Config values (never user text); all other values are
+# query parameters.
 
-_CLUSTER_NEIGHBOURHOOD = """
-MATCH (subject:Account {{account_id: $account_id}})
-MATCH (subject)-[r1:TRANSFERRED_TO]->(neighbor:Account)
-OPTIONAL MATCH (neighbor)-[r2:TRANSFERRED_TO]->(neighbor2:Account)
-WHERE id(neighbor2) <> id(subject)
-WITH
-    subject, neighbor, neighbor2, r1, r2
-RETURN DISTINCT
-    subject.account_id      AS from_id,
-    neighbor.account_id     AS to_id,
-    r1.tx_graph_id          AS tx_graph_id,
-    r1.raw_record_id        AS raw_record_id,
-    r1.amount               AS amount,
-    r1.amount_str           AS amount_str,
-    r1.currency             AS currency,
-    r1.timestamp_utc        AS timestamp_utc,
-    r1.channel              AS channel
-LIMIT {limit}
-UNION
-MATCH (subject:Account {{account_id: $account_id}})
-MATCH (neighbor:Account)-[r1:TRANSFERRED_TO]->(subject)
-RETURN DISTINCT
-    neighbor.account_id     AS from_id,
-    subject.account_id      AS to_id,
-    r1.tx_graph_id          AS tx_graph_id,
-    r1.raw_record_id        AS raw_record_id,
-    r1.amount               AS amount,
-    r1.amount_str           AS amount_str,
-    r1.currency             AS currency,
-    r1.timestamp_utc        AS timestamp_utc,
-    r1.channel              AS channel
-LIMIT {limit}
+_TRANSFER_FIELDS = """
+    r.tx_graph_id   AS tx_graph_id,
+    r.raw_record_id AS raw_record_id,
+    r.amount        AS amount,
+    r.amount_str    AS amount_str,
+    r.currency      AS currency,
+    r.timestamp_utc AS timestamp_utc,
+    r.channel       AS channel
 """
 
-_LAYERING_MULTI_HOP = """
-MATCH path = (sender:Account {{account_id: $sender_id}})-[:TRANSFERRED_TO*{min_hops}..{max_hops}]->(receiver:Account)
-WHERE receiver.account_id <> $sender_id
-WITH path,
-     [n IN nodes(path) | n.account_id] AS node_ids,
-     [r IN relationships(path) | {{
-         tx_graph_id:   r.tx_graph_id,
-         amount:        r.amount,
-         amount_str:    r.amount_str,
-         currency:      r.currency,
-         timestamp_utc: r.timestamp_utc,
-         channel:       r.channel
-     }}] AS transfers
-RETURN node_ids, transfers, length(path) AS path_length
-ORDER BY path_length DESC
-LIMIT {limit}
+_WINDOW_OUT = """
+MATCH (a:Account {account_id: $account_id})-[r:TRANSFERRED_TO]->(b:Account)
+WHERE r.timestamp_utc >= $from_ts AND r.timestamp_utc <= $to_ts
+RETURN a.account_id AS account_id, b.account_id AS counterpart_id, """ + _TRANSFER_FIELDS + """
+ORDER BY r.timestamp_utc
+LIMIT $limit
 """
+
+_WINDOW_IN = """
+MATCH (b:Account)-[r:TRANSFERRED_TO]->(a:Account {account_id: $account_id})
+WHERE r.timestamp_utc >= $from_ts AND r.timestamp_utc <= $to_ts
+RETURN a.account_id AS account_id, b.account_id AS counterpart_id, """ + _TRANSFER_FIELDS + """
+ORDER BY r.timestamp_utc
+LIMIT $limit
+"""
+
+# Doubled braces: this fragment is embedded in templates passed to str.format().
+_REL_MAP = """{{tx_graph_id: c.tx_graph_id, amount: c.amount, amount_str: c.amount_str,
+               currency: c.currency, timestamp_utc: c.timestamp_utc, channel: c.channel}}"""
+
+_CHAIN_OK = """
+all(i IN range(1, size(chain) - 1) WHERE
+    chain[i].timestamp_utc > chain[i - 1].timestamp_utc
+    AND chain[i].amount >= $retention * chain[i - 1].amount
+    AND duration.inSeconds(datetime(chain[i - 1].timestamp_utc),
+                           datetime(chain[i].timestamp_utc)).seconds <= $max_gap_s)
+"""
+
+_LAYERING_FORWARD = """
+MATCH (s:Account {{account_id: $sender_id}})-[r0:TRANSFERRED_TO {{tx_graph_id: $tx_graph_id}}]->(r:Account)
+MATCH p = (r)-[rels:TRANSFERRED_TO*1..{k}]->(:Account)
+WHERE all(x IN rels WHERE x.timestamp_utc > r0.timestamp_utc AND x.timestamp_utc <= $to_ts)
+WITH p, rels, [r0] + rels AS chain
+WHERE """ + _CHAIN_OK + """
+RETURN [n IN nodes(p) | n.account_id] AS node_ids,
+       [c IN chain | """ + _REL_MAP + """] AS transfers
+ORDER BY size(rels) DESC
+LIMIT 25
+"""
+
+_LAYERING_BACKWARD = """
+MATCH (s:Account {{account_id: $sender_id}})-[r0:TRANSFERRED_TO {{tx_graph_id: $tx_graph_id}}]->(:Account)
+MATCH p = (:Account)-[rels:TRANSFERRED_TO*1..{k}]->(s)
+WHERE all(x IN rels WHERE x.timestamp_utc < r0.timestamp_utc AND x.timestamp_utc >= $from_ts)
+WITH p, rels, rels + [r0] AS chain
+WHERE """ + _CHAIN_OK + """
+RETURN [n IN nodes(p) | n.account_id] AS node_ids,
+       [c IN rels | """ + _REL_MAP + """] AS transfers
+ORDER BY size(rels) DESC
+LIMIT 25
+"""
+
+_CYCLES = """
+MATCH p = (a:Account {{account_id: $account_id}})-[rels:TRANSFERRED_TO*{min_len}..{max_len}]->(a)
+WHERE all(x IN rels WHERE x.timestamp_utc >= $from_ts AND x.timestamp_utc <= $to_ts)
+// Time ordering is checked by the detector over every rotation of the cycle:
+// a ring m1→m2→…→m1 is only ordered when read from the account that started it.
+RETURN [n IN nodes(p) | n.account_id] AS node_ids,
+       [c IN rels | """ + _REL_MAP + """] AS transfers
+LIMIT 50
+"""
+
+
+def _iso_utc(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _combine_chains(back: list[dict], fwd: list[dict], sender_id: str) -> list[dict]:
+    """Join backward chains (ending at sender) with forward chains (starting with the subject transfer)."""
+    backs = [{"node_ids": [sender_id], "transfers": []}] + [b for b in back if b.get("node_ids")]
+    out = []
+    for b in backs[:6]:
+        for f in fwd[:6]:
+            out.append({
+                "node_ids": list(b["node_ids"]) + list(f["node_ids"]),
+                "transfers": list(b["transfers"]) + list(f["transfers"]),
+            })
+    return out
 
 
 class NetworkAnalyserAgent:
@@ -382,119 +427,98 @@ class NetworkAnalyserAgent:
             )
 
         # ------------------------------------------------------------------
-        # Step 3: Fetch graph data for the primary accounts
+        # Step 3: Analysis window around the investigated transaction (v2)
         # ------------------------------------------------------------------
-        limit = self._config.transfer_query_limit
-        primary_id = sender_id
+        cfg = self._config
+        anchor = transaction.timestamp
+        if anchor is None:
+            warnings.append(
+                "Transaction timestamp missing: temporal window cannot be anchored; "
+                "layering skipped and all available history analysed."
+            )
+            from_ts, to_ts = "0000", "9999"
+        else:
+            from_ts = _iso_utc(anchor - timedelta(hours=cfg.lookback_hours))
+            to_ts = _iso_utc(anchor + timedelta(hours=cfg.horizon_hours))
 
-        outgoing: list[dict] = []
-        incoming: list[dict] = []
-        cluster_rows: list[dict] = []
+        limit = cfg.transfer_query_limit
+        subjects = [sender_id] + ([receiver_id] if receiver_id != sender_id else [])
+        rows: dict[str, dict[str, list[dict]]] = {}
+        cycles: dict[str, list[dict]] = {}
+        for acc in subjects:
+            rows[acc] = {"in": [], "out": []}
+            for direction, cypher in (("out", _WINDOW_OUT), ("in", _WINDOW_IN)):
+                try:
+                    rows[acc][direction] = self._run(mgr, cypher, account_id=acc,
+                                                     from_ts=from_ts, to_ts=to_ts, limit=limit)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"{direction} transfer query failed for {acc}: {type(exc).__name__}")
+                    detectors_skipped.extend(
+                        ["STRUCTURING", "FAN_OUT", "RAPID_FORWARDING", "MULE_LIKE"] if direction == "out"
+                        else ["FAN_IN", "RAPID_FORWARDING", "MULE_LIKE"])
+                    rows[acc][direction] = []
+            try:
+                cycles[acc] = self._run(
+                    mgr,
+                    _CYCLES.format(min_len=cfg.cluster_min_edges, max_len=cfg.cluster_max_cycle_length),
+                    account_id=acc, from_ts=from_ts, to_ts=to_ts)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Cycle query failed for {acc}: {type(exc).__name__}")
+                detectors_skipped.append("SUSPICIOUS_CLUSTER")
+                cycles[acc] = []
+        detectors_run.append("graph_fetch_window")
+
         paths: list[dict] = []
-
-        try:
-            outgoing = qh.get_account_outgoing_transfers(primary_id, limit=limit)
-            detectors_run.append("graph_fetch_outgoing")
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Outgoing transfer query failed: {type(exc).__name__}")
-            detectors_skipped.extend(["STRUCTURING", "FAN_OUT", "RAPID_FORWARDING", "MULE_LIKE"])
-
-        try:
-            incoming = qh.get_account_incoming_transfers(primary_id, limit=limit)
-            detectors_run.append("graph_fetch_incoming")
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Incoming transfer query failed: {type(exc).__name__}")
-            detectors_skipped.extend(["FAN_IN", "RAPID_FORWARDING", "MULE_LIKE"])
-
-        # Cluster neighbourhood
-        try:
-            cluster_rows = self._query_cluster_neighbourhood(mgr, primary_id)
-            detectors_run.append("graph_fetch_cluster")
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Cluster neighbourhood query failed: {type(exc).__name__}")
-            detectors_skipped.append("SUSPICIOUS_CLUSTER")
-
-        # Layering paths
-        try:
-            paths = self._query_layering_paths(mgr, primary_id)
-            detectors_run.append("graph_fetch_paths")
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Layering path query failed: {type(exc).__name__}")
+        if anchor is not None:
+            try:
+                k = max(cfg.max_layering_hops - 1, 1)
+                params = dict(sender_id=sender_id, tx_graph_id=make_tx_graph_id(transaction),
+                              from_ts=from_ts, to_ts=to_ts,
+                              retention=cfg.layering_min_amount_retention,
+                              max_gap_s=int(cfg.layering_hop_max_gap_hours * 3600))
+                fwd = self._run(mgr, _LAYERING_FORWARD.format(k=k), **params)
+                back = self._run(mgr, _LAYERING_BACKWARD.format(k=k), **params)
+                paths = _combine_chains(back, fwd, sender_id)
+                detectors_run.append("graph_fetch_paths")
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Layering path query failed: {type(exc).__name__}")
+                detectors_skipped.append("LAYERING")
+        else:
             detectors_skipped.append("LAYERING")
 
         # ------------------------------------------------------------------
-        # Step 4: Run detectors
+        # Step 4: Run v2 detectors for the sender and the receiver
         # ------------------------------------------------------------------
-
-        # A. Layering
-        if "LAYERING" not in detectors_skipped:
+        def run(name: str, fn, *args) -> None:
+            if name in detectors_skipped:
+                return
             try:
-                f = detect_layering(paths, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("LAYERING")
+                findings.extend(fn(*args, cfg))
+                detectors_run.append(name)
             except Exception as exc:  # noqa: BLE001
-                warnings.append(f"LAYERING detector error: {type(exc).__name__}")
-                detectors_skipped.append("LAYERING")
+                warnings.append(f"{name} detector error: {type(exc).__name__}")
+                detectors_skipped.append(name)
 
-        # B. Structuring
-        if "STRUCTURING" not in detectors_skipped and outgoing:
-            try:
-                f = detect_structuring(outgoing, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("STRUCTURING")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"STRUCTURING detector error: {type(exc).__name__}")
-                detectors_skipped.append("STRUCTURING")
+        run("LAYERING", detect_layering, paths, sender_id)
+        for acc in subjects:
+            r_in, r_out = rows[acc]["in"], rows[acc]["out"]
+            run("STRUCTURING", detect_structuring, r_out, acc)
+            run("FAN_IN", detect_fan_in, r_in, acc)
+            run("FAN_OUT", detect_fan_out, r_out, acc)
+            run("MULE_LIKE", detect_mule_like, r_in, r_out, acc)
+            run("RAPID_FORWARDING", detect_rapid_forwarding, r_in, r_out, acc)
+            run("SUSPICIOUS_CLUSTER", detect_suspicious_cluster, cycles[acc], acc)
 
-        # C. Fan-in
-        if "FAN_IN" not in detectors_skipped and incoming:
-            try:
-                f = detect_fan_in(incoming, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("FAN_IN")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"FAN_IN detector error: {type(exc).__name__}")
-                detectors_skipped.append("FAN_IN")
-
-        # D. Fan-out
-        if "FAN_OUT" not in detectors_skipped and outgoing:
-            try:
-                f = detect_fan_out(outgoing, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("FAN_OUT")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"FAN_OUT detector error: {type(exc).__name__}")
-                detectors_skipped.append("FAN_OUT")
-
-        # E. Mule-like
-        if not any(d in detectors_skipped for d in ["FAN_IN", "FAN_OUT"]):
-            try:
-                f = detect_mule_like(incoming, outgoing, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("MULE_LIKE")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"MULE_LIKE detector error: {type(exc).__name__}")
-                detectors_skipped.append("MULE_LIKE")
-
-        # F. Rapid forwarding
-        if "RAPID_FORWARDING" not in detectors_skipped:
-            try:
-                f = detect_rapid_forwarding(incoming, outgoing, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("RAPID_FORWARDING")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"RAPID_FORWARDING detector error: {type(exc).__name__}")
-                detectors_skipped.append("RAPID_FORWARDING")
-
-        # G. Suspicious cluster
-        if "SUSPICIOUS_CLUSTER" not in detectors_skipped:
-            try:
-                f = detect_suspicious_cluster(cluster_rows, primary_id, self._config)
-                findings.extend(f)
-                detectors_run.append("SUSPICIOUS_CLUSTER")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"SUSPICIOUS_CLUSTER detector error: {type(exc).__name__}")
-                detectors_skipped.append("SUSPICIOUS_CLUSTER")
+        # A cycle through both sender and receiver is reported once.
+        deduped, seen_cycles = [], set()
+        for f in findings:
+            if f.pattern_type == NetworkPatternType.SUSPICIOUS_CLUSTER:
+                key = frozenset([f.subject_account_id, *f.related_account_ids])
+                if key in seen_cycles:
+                    continue
+                seen_cycles.add(key)
+            deduped.append(f)
+        findings = deduped
 
         # ------------------------------------------------------------------
         # Step 5: Assemble output
@@ -532,38 +556,10 @@ class NetworkAnalyserAgent:
     # Graph queries specific to Agent 3
     # ------------------------------------------------------------------
 
-    def _query_cluster_neighbourhood(
-        self, mgr: Neo4jConnectionManager, account_id: str
-    ) -> list[dict]:
-        """Bounded 2-hop neighbourhood for cluster detection."""
-        limit = min(self._config.transfer_query_limit, 200)
-        cypher = _CLUSTER_NEIGHBOURHOOD.format(limit=limit)
+    @staticmethod
+    def _run(mgr: Neo4jConnectionManager, cypher: str, **params) -> list[dict]:
         with mgr.session() as session:
-            result = session.run(cypher, account_id=account_id)
-            return result.data()
-
-    def _query_layering_paths(
-        self, mgr: Neo4jConnectionManager, account_id: str
-    ) -> list[dict]:
-        """
-        Bounded multi-hop paths from the sender account.
-
-        Neo4j 5 / GQL 1.0 does not support parameterised hop ranges in
-        variable-length patterns. Integer literals are interpolated from
-        validated Agent3Config values — safe (never user-supplied text).
-        """
-        min_hops = self._config.min_layering_hops
-        max_hops = self._config.max_layering_hops
-        limit = self._config.layering_path_limit
-
-        cypher = _LAYERING_MULTI_HOP.format(
-            min_hops=min_hops,
-            max_hops=max_hops,
-            limit=limit,
-        )
-        with mgr.session() as session:
-            result = session.run(cypher, sender_id=account_id)
-            return result.data()
+            return session.run(cypher, **params).data()
 
     # ------------------------------------------------------------------
     # Error output factory

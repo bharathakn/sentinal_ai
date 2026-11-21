@@ -54,6 +54,9 @@ class SyntheticDatasetValidator:
         # 6. Zero Label Leakage Verification
         self._check_zero_label_leakage(results)
 
+        # 7. Relational / behavioural consistency (generator v2)
+        self._check_behavioural_consistency(results)
+
         # Summarize pass/fail
         if len(results["errors"]) > 0:
             results["passed"] = False
@@ -185,11 +188,84 @@ class SyntheticDatasetValidator:
         check_name = "6_zero_label_leakage"
         errors = []
 
-        forbidden_target_cols = {"is_fraud", "risk_label", "scenario_id", "is_flagged_alert", "fraud_reason"}
+        forbidden_target_cols = {"is_fraud", "risk_label", "scenario_id", "is_flagged_alert",
+                                 "fraud_reason", "pattern_id"}
         leaked_cols = set(self.tx_features_df.columns) & forbidden_target_cols
 
         if len(leaked_cols) > 0:
             errors.append(f"TARGET LEAKAGE DETECTED! Forbidden target columns in feature matrix: {leaked_cols}")
 
+        leaked_edges = set(self.graph_edges_df.columns) & forbidden_target_cols
+        if leaked_edges:
+            errors.append(f"TARGET LEAKAGE DETECTED! Forbidden target columns in graph edges: {leaked_edges}")
+
         results["checks"][check_name] = "PASSED" if len(errors) == 0 else "FAILED"
+        results["errors"].extend(errors)
+
+    def _check_behavioural_consistency(self, results: Dict[str, Any]):
+        """Transaction features must agree with entity tables and the ledger."""
+        import numpy as np
+
+        check_name = "7_behavioural_consistency"
+        errors: List[str] = []
+        tx = self.tx_features_df.copy()
+        tx["ts"] = pd.to_datetime(tx["timestamp"], utc=True)
+
+        # (a) Chronological ids
+        if not tx["ts"].is_monotonic_increasing:
+            errors.append("Transaction ids are not in chronological order.")
+
+        # (b) Beneficiary record exists, precedes tx, and matches derived fields
+        ben = self.beneficiaries_df.copy()
+        ben["added"] = pd.to_datetime(ben["beneficiary_added_timestamp"], utc=True)
+        m = tx.merge(ben[["sender_account_id", "receiver_account_id", "added"]],
+                     on=["sender_account_id", "receiver_account_id"], how="left")
+        if m["added"].isna().any():
+            errors.append(f"{int(m['added'].isna().sum())} transactions have no beneficiary record.")
+        else:
+            mins = ((m["ts"] - m["added"]).dt.total_seconds() // 60).astype(int)
+            if (mins < 0).any():
+                errors.append("Beneficiary added after transaction.")
+            if (mins != m["time_since_beneficiary_added_min"]).any():
+                errors.append("time_since_beneficiary_added_min disagrees with beneficiaries table.")
+            if ((mins < 30 * 1440).astype(int) != m["is_new_beneficiary"]).any():
+                errors.append("is_new_beneficiary disagrees with beneficiary added date.")
+
+        # (c) Device flag
+        dev = self.devices_df.copy()
+        dev["first_seen"] = pd.to_datetime(dev["first_seen_timestamp"], utc=True)
+        d = tx.merge(dev[["device_id", "customer_id", "first_seen"]], on="device_id", how="left")
+        expected = ((d["ts"] - d["first_seen"]) < pd.Timedelta(days=7)) | (d["customer_id"] != d["sender_customer_id"])
+        if (expected.astype(int) != d["is_new_device"]).any():
+            errors.append("is_new_device disagrees with device registry.")
+        if (d["first_seen"] > d["ts"]).any():
+            errors.append("Device used before its first_seen timestamp.")
+
+        # (d) Distance from home
+        c = tx.merge(self.customers_df[["customer_id", "home_lat", "home_long"]],
+                     left_on="sender_customer_id", right_on="customer_id", how="left")
+        p1, p2 = np.radians(c["home_lat"]), np.radians(c["tx_lat"])
+        dl = np.radians(c["tx_long"] - c["home_long"])
+        dist = 6371.0 * np.arccos(np.clip(np.sin(p1) * np.sin(p2) + np.cos(p1) * np.cos(p2) * np.cos(dl), -1, 1))
+        if (np.abs(dist - c["distance_from_home_km"]) > 1.0).any():
+            errors.append("distance_from_home_km disagrees with coordinates.")
+
+        # (e) Velocity features from the ledger
+        freq = []
+        last = {}
+        recent: Dict[str, list] = {}
+        bad_gap = 0
+        for s, t, gap in zip(tx["sender_account_id"], tx["ts"], tx["time_since_last_tx_sec"]):
+            w = [x for x in recent.get(s, []) if (t - x) < pd.Timedelta(hours=24)] + [t]
+            recent[s] = w
+            freq.append(len(w))
+            if s in last and int((t - last[s]).total_seconds()) != int(gap):
+                bad_gap += 1
+            last[s] = t
+        if (np.array(freq) != tx["tx_frequency_24h"].to_numpy()).any():
+            errors.append("tx_frequency_24h disagrees with ledger.")
+        if bad_gap:
+            errors.append(f"time_since_last_tx_sec disagrees with ledger for {bad_gap} transactions.")
+
+        results["checks"][check_name] = "PASSED" if not errors else "FAILED"
         results["errors"].extend(errors)

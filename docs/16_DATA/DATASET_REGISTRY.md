@@ -139,53 +139,75 @@ Watchlist screening and entity risk matching for Agent 2 (Evidence Gatherer) and
 > [!IMPORTANT]
 > **SYNTHETIC DATA DISCLAIMER**: This dataset is 100% programmatically generated synthetic data. It contains zero real customer PII, zero real banking credentials, and zero real transaction records. It must never be described or presented as real Indian banking data.
 
-## Verified Location & Files
+## Version
 
-* **Target Directory:** `dataset/processed/custom_india/`
-* **Generated CSV Artifacts & Storage Metrics:**
-  * `customers.csv` (1,200 synthetic customer entity records, 126.7 KB)
-  * `accounts.csv` (1,500 synthetic bank account records with `SYN99` prefix, 167.6 KB)
-  * `devices.csv` (1,400 synthetic device fingerprint records, 157.7 KB)
-  * `beneficiaries.csv` (2,000 synthetic beneficiary mapping records, 192.5 KB)
-  * `transactions_features.csv` (10,000 transaction observation feature vectors $X$, 3.14 MB)
-  * `transactions_targets.csv` (10,000 ground-truth target metadata vectors $y$, 709.0 KB)
-  * `graph_edges.csv` (10,000 directed transfer edges for Neo4j import, 1.14 MB)
-  * `dataset_metadata.json` (Provenance, seed configuration, and distribution manifest, 1.18 KB)
+**v2.0.0** (2026-11-21, generator `src/data/synthetic_india_generator.py`, seed 42).
+v1 is archived (not deleted) at `dataset/processed/_archive/custom_india_v1/`.
 
-## Dataset Specifications & Statistics
+**Why v2:** v1 drew sender, receiver, device, location and every behavioural
+flag independently at random. Network scenarios (layering, mule, ring,
+structuring) existed only as labels — their transactions had no chain, hub or
+burst structure, so graph analysis could not find them — and the entity
+tables contradicted the transaction flags (registered beneficiary pairs matched
+0.08% of transactions; 699 "near home" transactions had coordinates > 500 km
+away; `tx_frequency_24h` was random). `graph_edges.csv` also carried
+`scenario_id` (a label).
 
-* **Total Transactions:** **10,000**
-* **Supporting Entities:** **1,200** Customers, **1,500** Accounts, **1,400** Devices, **2,000** Beneficiaries.
-* **Random Seed:** **`42`** (Configurable reproducible seed).
-* **Generation Engine:** Programmatic Python generator script (`src/data/synthetic_india_generator.py`).
-* **Temporal Window:** 30 contiguous days (`2026-08-01T00:15:43+05:30` to `2026-08-30T23:59:25+05:30` IST).
+v2 generates each scenario as an actual transaction pattern and derives every
+behavioural feature from the generated ledger and entity tables.
 
-## Indian Payment Channels Represented
+## Location & Files
 
-* **UPI (Unified Payments Interface):** **7,070** transactions (70.70%) — Enforces NPCI per-transaction limit ($\le \text{₹1,00,000}$).
-* **NEFT (National Electronic Funds Transfer):** **2,213** transactions (22.13%) — Standard batch retail & vendor transfers.
-* **RTGS (Real Time Gross Settlement):** **717** transactions (7.17%) — Enforces mandatory RBI regulatory minimum ($\ge \text{₹2,00,000}$).
+* **Directory:** `dataset/processed/custom_india/` (git-ignored; regenerate with
+  `python scripts/generate_synthetic_dataset.py`)
+  * `customers.csv` — 1,200 customers (22 Indian cities)
+  * `accounts.csv` — 1,500 accounts (33 `MULE_SUSPECT`, opened 5–60 days before the window)
+  * `devices.csv` — 2,298 devices (registered devices + devices first seen in-window)
+  * `beneficiaries.csv` — 8,081 sender→receiver records (established payees + payees added in-window)
+  * `transactions_features.csv` — 10,000 transactions (features only)
+  * `transactions_targets.csv` — 10,000 labels: `is_fraud`, `risk_label`, `scenario_id`, `pattern_id`, `alert_id`
+  * `graph_edges.csv` — 10,000 edges (no label columns)
+  * `dataset_metadata.json`
 
-## Represented Scenarios (12 Distinct Behaviors)
+## Specifications
 
-1. `SCENARIO_1_NORMAL_LEGITIMATE`: **8,200** transactions (82.00%) — Benign consumer transfers with realistic noise.
-2. `SCENARIO_2_HIGH_VALUE_SPIKE`: **200** transactions — Sudden high-amount transfers ($8\times$–$15\times$ baseline average).
-3. `SCENARIO_3_RAPID_BURST`: **150** transactions — Rapid sequential UPI transfers on newly added beneficiaries.
-4. `SCENARIO_4_NEW_BENEFICIARY_LARGE_TX`: **150** transactions — Large NEFT/RTGS transfers to beneficiaries created $< 30$ minutes prior.
-5. `SCENARIO_5_NEW_DEVICE_SUSPICIOUS`: **150** transactions — Unrecognised device logins with high geographic location deltas.
-6. `SCENARIO_6_STRUCTURING_SPLITTING`: **150** transactions — Transfers structured just below round threshold limits (e.g., ₹49,500 / ₹98,500).
-7. `SCENARIO_7_LAYERING_NETWORK`: **200** transactions — Rapid multi-hop RTGS/NEFT passthrough transfers ($A \to B \to C \to D$).
-8. `SCENARIO_8_MULE_PASS_THROUGH`: **200** transactions — Immediate depletion of low-balance proxy accounts.
-9. `SCENARIO_9_FRAUD_RING_HUB`: **200** transactions — Multi-account fan-in transfers targeting centralized hub nodes.
-10. `SCENARIO_10_IMPOSSIBLE_TRAVEL`: **150** transactions — Geodesic location discrepancy $> 1,200$ km within short time windows.
-11. `SCENARIO_11_SHARED_DEVICE_IP`: **150** transactions — Multiple customer accounts sharing subnets/hardware fingerprints.
-12. `SCENARIO_12_MIXED_BORDERLINE_TRAVEL`: **100** transactions — Legitimate high-distance travel / vacation transfers (`is_fraud = 0`).
+* **Window:** 2026-08-01 to 2026-08-30 IST. Transaction ids are chronological.
+* **Labels:** LEGITIMATE 8,200 · FRAUDULENT 1,338 · BORDERLINE 462.
+* **Channels:** UPI 6,841 · NEFT 3,013 · RTGS 146 (UPI ≤ ₹1,00,000; RTGS ≥ ₹2,00,000).
+* **Criminal pool:** mules, layering intermediaries, ring members, structuring
+  senders and recipients, and burst / account-takeover payees come from a
+  small pool (MULE_SUSPECT accounts + ~6% of others). Victims are random customers.
+
+## Consistency guarantees (validator check 7)
+
+* Every transaction pair has a beneficiary record added before it;
+  `is_new_beneficiary` = added < 30 days earlier; `time_since_beneficiary_added_min` derived from it.
+* `is_new_device` = device first seen < 7 days earlier, or device owned by another customer.
+* `distance_from_home_km` = haversine(home, transaction coordinates); `tx_city` names the real location.
+* `tx_frequency_24h`, `time_since_last_tx_sec`, balances computed from the chronological ledger.
+
+## Scenarios (12)
+
+| Scenario | Txns | Generated pattern |
+|---|---|---|
+| 1 Normal legitimate | 8,200 | Established payee (80%) or payee added 1–29 days earlier; home location (97%); amount ≈ account baseline |
+| 2 High-value spike | 200 | 8–15× baseline to an established payee (50% fraud / 50% borderline) |
+| 3 Rapid burst | 150 | 5–10 UPI payments within ~1 h to new payees, usually from an unregistered new device |
+| 4 New beneficiary, large | 150 | ₹1.5–4.5 L NEFT to a payee added 2–28 min earlier |
+| 5 New device | 150 | Unregistered new device, 100–500 km from home, payee added 10–60 min earlier |
+| 6 Structuring | 150 | 4–6 transfers of ₹45,000–49,999 or ₹95,000–99,999 within ~20 h to 2–4 payees |
+| 7 Layering | 200 | Chain of 3–5 hops, 10–120 min apart, each hop 97–99.5% of the previous |
+| 8 Mule pass-through | 200 | 3–5 sources pay a mule, which forwards 85–95% within hours |
+| 9 Fraud ring | 200 | Cycle through 4–6 accounts plus member → hub transfers within ~2 days |
+| 10 Impossible travel | 150 | Payment 1,200–2,500 km from home within 30–180 min of a home payment |
+| 11 Shared device | 150 | 3–5 other customers' accounts transact from one device / IP |
+| 12 Borderline travel | 100 | Legitimate long-distance travel payment (BORDERLINE) |
 
 ## Intended Multi-Purpose Use
 
 The dataset is explicitly designed for **multiple system purposes**:
 - **Model Development & Training:** Feature engineering and baseline model fitting (XGBoost, Isolation Forest).
-- **Model Testing & Benchmark Evaluation:** Temporal Out-of-Time (OOT) evaluation (Days 1–21 Train, Days 22–30 Test).
+- **Model Testing & Benchmark Evaluation:** stratified 70/15/15 split (see the India behavioural model doc).
 - **Behavioral Anomaly Detection:** Evaluating unsupervised anomaly scoring engines.
 - **Neo4j Graph Network Analysis:** Bulk loading directed `:TRANSFERRED_TO` relationships for Agent 3 Cypher queries.
 - **Agent Pipeline Handoffs:** Testing structured case data transfer across Agents 1 through 5.
@@ -194,9 +216,8 @@ The dataset is explicitly designed for **multiple system purposes**:
 ## Validation Status
 
 **VERIFIED AND PASSED**
-- All 6 core structural, referential, regulatory, and zero-leakage validation checks passed.
-- All 12 scenarios verified and statistically represented.
-- ML suitability verified as **READY**. Zero model performance metrics are claimed at this stage (pending formal training phase).
+- All 7 validation checks pass, including check 7 (behavioural consistency).
+- India behavioural model (Agent 1) trained on v2: see `docs/04_MACHINE_LEARNING/INDIA_BEHAVIOUR_MODEL.md`.
 
 ## Known Limitations
 

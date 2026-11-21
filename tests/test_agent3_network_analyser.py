@@ -253,13 +253,13 @@ class TestMuleLikeNetwork:
 
     def test_mule_detected(self):
         inc = [
-            _in_row("SRC1", amount=500, tx_id="IN1"),
-            _in_row("SRC2", amount=300, tx_id="IN2"),
+            _in_row("SRC1", amount=500, ts_offset_min=0, tx_id="IN1"),
+            _in_row("SRC2", amount=300, ts_offset_min=20, tx_id="IN2"),
         ]
         out = [
-            _out_row("DST1", amount=400, tx_id="OUT1"),
-            _out_row("DST2", amount=200, tx_id="OUT2"),
-        ]
+            _out_row("DST1", amount=400, ts_offset_min=60, tx_id="OUT1"),
+            _out_row("DST2", amount=200, ts_offset_min=90, tx_id="OUT2"),
+        ]  # 600 / 800 = 75% passed through
         result = detect_mule_like(inc, out, "ACC_A", _CFG)
         assert len(result) == 1
         f = result[0]
@@ -269,8 +269,8 @@ class TestMuleLikeNetwork:
         assert len(f.supporting_transfers) == 4
 
     def test_mule_explanation_labels_heuristic(self):
-        inc = [_in_row(f"SRC{i}", tx_id=f"IN{i}") for i in range(2)]
-        out = [_out_row(f"DST{i}", tx_id=f"OUT{i}") for i in range(2)]
+        inc = [_in_row(f"SRC{i}", ts_offset_min=i * 10, tx_id=f"IN{i}") for i in range(2)]
+        out = [_out_row(f"DST{i}", ts_offset_min=60 + i * 10, tx_id=f"OUT{i}") for i in range(2)]
         result = detect_mule_like(inc, out, "ACC_A", _CFG)
         assert "heuristic" in result[0].explanation.lower()
         assert "possible" in result[0].explanation.lower()
@@ -282,10 +282,22 @@ class TestMuleLikeNetwork:
         assert result == []
 
     def test_mule_heuristic_score_in_range(self):
-        inc = [_in_row(f"SRC{i}", tx_id=f"IN{i}") for i in range(3)]
-        out = [_out_row(f"DST{i}", tx_id=f"OUT{i}") for i in range(3)]
+        inc = [_in_row(f"SRC{i}", ts_offset_min=i * 10, tx_id=f"IN{i}") for i in range(3)]
+        out = [_out_row(f"DST{i}", ts_offset_min=60 + i * 10, tx_id=f"OUT{i}") for i in range(3)]
         result = detect_mule_like(inc, out, "ACC_A", _CFG)
         assert 0.0 <= result[0].heuristic_score <= 1.0
+
+    def test_mule_low_passthrough_not_flagged(self):
+        """v2: receiving from many and paying out a small fraction is not pass-through."""
+        inc = [_in_row(f"SRC{i}", amount=1000, ts_offset_min=i * 10, tx_id=f"IN{i}") for i in range(3)]
+        out = [_out_row("DST1", amount=500, ts_offset_min=60, tx_id="OUT1")]  # 500/3000
+        assert detect_mule_like(inc, out, "ACC_A", _CFG) == []
+
+    def test_mule_outgoing_before_incoming_not_flagged(self):
+        """v2: money out BEFORE money in is not pass-through."""
+        inc = [_in_row(f"SRC{i}", amount=100, ts_offset_min=100 + i, tx_id=f"IN{i}") for i in range(2)]
+        out = [_out_row("DST1", amount=200, ts_offset_min=0, tx_id="OUT1")]
+        assert detect_mule_like(inc, out, "ACC_A", _CFG) == []
 
     def test_mule_empty_outgoing(self):
         inc = [_in_row(f"SRC{i}", tx_id=f"IN{i}") for i in range(3)]
@@ -329,8 +341,8 @@ class TestLayeringNetwork:
         result = detect_layering(paths, "A", _CFG)
         assert result[0].layering_paths[0].hop_count == 2
 
-    def test_layering_missing_timestamps_handled(self):
-        """Paths without timestamps should still produce a finding."""
+    def test_layering_missing_timestamps_not_flagged(self):
+        """v2: time order cannot be established without timestamps — not flagged."""
         path = {
             "node_ids": ["A", "B", "C"],
             "transfers": [
@@ -342,8 +354,32 @@ class TestLayeringNetwork:
             "path_length": 2,
         }
         result = detect_layering([path], "A", _CFG)
-        assert len(result) == 1
-        assert result[0].elapsed_minutes is None  # no timestamps available
+        assert result == []
+
+    def test_layering_out_of_order_not_flagged(self):
+        path = _path_row(["A", "B", "C"], 2)
+        path["transfers"][1]["timestamp_utc"] = _ts(-30)  # second hop before first
+        assert detect_layering([path], "A", _CFG) == []
+
+    def test_layering_amount_drop_not_flagged(self):
+        """v2: a hop carrying < retention × previous amount breaks the chain."""
+        path = _path_row(["A", "B", "C"], 2, amounts=[1000.0, 300.0])
+        assert detect_layering([path], "A", _CFG) == []
+
+    def test_layering_slow_hop_not_flagged(self):
+        path = _path_row(["A", "B", "C"], 2)
+        path["transfers"][1]["timestamp_utc"] = _ts(7 * 60)  # 7h > 6h hop gap
+        assert detect_layering([path], "A", _CFG) == []
+
+    def test_layering_subchain_suppressed(self):
+        long = _path_row(["A", "B", "C", "D"], 3)
+        short = {"node_ids": ["A", "B", "C"], "transfers": long["transfers"][:2], "path_length": 2}
+        result = detect_layering([short, long], "A", _CFG)
+        assert len(result) == 1 and result[0].hop_count == 3
+
+    def test_layering_repeated_account_not_flagged(self):
+        path = _path_row(["A", "B", "A"], 2)
+        assert detect_layering([path], "A", _CFG) == []
 
 
 # ---------------------------------------------------------------------------
@@ -502,16 +538,25 @@ class TestStructuringNetwork:
 
     def test_structuring_detected_in_window(self):
         outgoing = [
-            _out_row("B", amount=900, ts_offset_min=0, tx_id="T1"),
-            _out_row("C", amount=850, ts_offset_min=60, tx_id="T2"),
-            _out_row("D", amount=920, ts_offset_min=120, tx_id="T3"),
+            _out_row("B", amount=49500, ts_offset_min=0, tx_id="T1"),
+            _out_row("C", amount=49800, ts_offset_min=60, tx_id="T2"),
+            _out_row("D", amount=99000, ts_offset_min=120, tx_id="T3"),
         ]
         result = detect_structuring(outgoing, "A", _CFG)
         assert len(result) >= 1
         assert result[0].pattern_type == NetworkPatternType.STRUCTURING
 
+    def test_structuring_ordinary_amounts_not_flagged(self):
+        """v2: frequent payments of ordinary amounts are not structuring."""
+        outgoing = [_out_row("B", amount=900 + i, ts_offset_min=i * 30, tx_id=f"T{i}") for i in range(5)]
+        assert detect_structuring(outgoing, "A", _CFG) == []
+
+    def test_structuring_exact_round_amount_not_flagged(self):
+        outgoing = [_out_row("B", amount=50000, ts_offset_min=i * 30, tx_id=f"T{i}") for i in range(3)]
+        assert detect_structuring(outgoing, "A", _CFG) == []
+
     def test_structuring_explanation_not_legal_threshold(self):
-        outgoing = [_out_row("B", ts_offset_min=i * 30, tx_id=f"T{i}") for i in range(3)]
+        outgoing = [_out_row("B", amount=49900, ts_offset_min=i * 30, tx_id=f"T{i}") for i in range(3)]
         result = detect_structuring(outgoing, "A", _CFG)
         assert result  # at least one finding
         explanation = result[0].explanation.lower()
@@ -521,23 +566,21 @@ class TestStructuringNetwork:
     def test_structuring_no_finding_outside_window(self):
         """Transfers spread > 24h apart — should not window together."""
         outgoing = [
-            _out_row("B", ts_offset_min=0, tx_id="T1"),
-            _out_row("C", ts_offset_min=25 * 60, tx_id="T2"),  # 25h later
-            _out_row("D", ts_offset_min=50 * 60, tx_id="T3"),  # 50h later
+            _out_row("B", amount=49500, ts_offset_min=0, tx_id="T1"),
+            _out_row("C", amount=49500, ts_offset_min=25 * 60, tx_id="T2"),  # 25h later
+            _out_row("D", amount=49500, ts_offset_min=50 * 60, tx_id="T3"),  # 50h later
         ]
         result = detect_structuring(outgoing, "A", _CFG)
         assert result == []
 
-    def test_structuring_missing_timestamps_path(self):
-        """When no timestamps: ≥ min_transfers still flags (with lower score)."""
+    def test_structuring_missing_timestamps_not_flagged(self):
+        """v2: the window cannot be established without timestamps — not flagged."""
         rows = []
         for i in range(3):
-            r = _out_row("B", tx_id=f"T{i}")
+            r = _out_row("B", amount=49500, tx_id=f"T{i}")
             r["timestamp_utc"] = None
             rows.append(r)
-        result = detect_structuring(rows, "A", _CFG)
-        assert len(result) == 1
-        assert result[0].heuristic_score < 0.5  # lower confidence
+        assert detect_structuring(rows, "A", _CFG) == []
 
 
 # ---------------------------------------------------------------------------
@@ -545,42 +588,55 @@ class TestStructuringNetwork:
 # ---------------------------------------------------------------------------
 
 class TestSuspiciousCluster:
-    """Scenario 8: dense or cyclic connected group."""
+    """Scenario 8: time-ordered transfer cycle (v2)."""
+
+    @staticmethod
+    def _cycle(nodes, minutes):
+        return {
+            "node_ids": nodes,
+            "transfers": [
+                {"tx_graph_id": f"C{i}::DS", "amount": 100.0, "amount_str": "100", "currency": "INR",
+                 "timestamp_utc": _ts(m), "channel": "UPI"}
+                for i, m in enumerate(minutes)
+            ],
+        }
 
     def test_cluster_detected(self):
-        rows = [
-            _cluster_row("A", "B", "T1"),
-            _cluster_row("B", "C", "T2"),
-            _cluster_row("C", "D", "T3"),
-            _cluster_row("D", "A", "T4"),  # cycle
-            _cluster_row("A", "C", "T5"),
-        ]
-        result = detect_suspicious_cluster(rows, "A", _CFG)
+        cyc = self._cycle(["A", "B", "C", "D", "A"], [0, 30, 60, 90])
+        result = detect_suspicious_cluster([cyc], "A", _CFG)
         assert len(result) == 1
-        f = result[0]
-        assert f.pattern_type == NetworkPatternType.SUSPICIOUS_CLUSTER
+        assert result[0].pattern_type == NetworkPatternType.SUSPICIOUS_CLUSTER
+        assert set(result[0].related_account_ids) == {"B", "C", "D"}
 
     def test_cluster_cycle_detected_in_explanation(self):
-        rows = [
-            _cluster_row("A", "B", "T1"),
-            _cluster_row("B", "C", "T2"),
-            _cluster_row("C", "D", "T3"),
-            _cluster_row("D", "A", "T4"),  # cycle: D->A while A sends to B
-            _cluster_row("A", "C", "T5"),
-        ]
-        result = detect_suspicious_cluster(rows, "A", _CFG)
-        # Score should include cycle bonus
-        assert result[0].heuristic_score > 0.0
+        cyc = self._cycle(["A", "B", "C", "D", "A"], [0, 30, 60, 90])
+        result = detect_suspicious_cluster([cyc], "A", _CFG)
+        assert "cycle" in result[0].explanation.lower()
+        assert 0.0 < result[0].heuristic_score <= 1.0
+
+    def test_cluster_rotation_detected(self):
+        """Read from C, the ring C→D→A→B→C is ordered only from A — still a cycle."""
+        cyc = self._cycle(["C", "D", "A", "B", "C"], [60, 90, 0, 30])
+        result = detect_suspicious_cluster([cyc], "C", _CFG)
+        assert len(result) == 1
+        assert result[0].supporting_transfers[0].from_account_id == "A"
+
+    def test_cluster_not_time_ordered_not_flagged(self):
+        cyc = self._cycle(["A", "B", "C", "D", "A"], [0, 60, 30, 90])  # two descents
+        assert detect_suspicious_cluster([cyc], "A", _CFG) == []
+
+    def test_cluster_too_slow_not_flagged(self):
+        cyc = self._cycle(["A", "B", "C", "D", "A"], [0, 30 * 60, 60 * 60, 80 * 60])  # 80h
+        assert detect_suspicious_cluster([cyc], "A", _CFG) == []
 
     def test_cluster_below_threshold(self):
-        rows = [
-            _cluster_row("A", "B", "T1"),
-            _cluster_row("B", "C", "T2"),
-            _cluster_row("C", "A", "T3"),
-        ]
-        result = detect_suspicious_cluster(rows, "A", _CFG)
-        # 3 accounts, 3 edges — below min of 4 each
-        assert result == []
+        cyc = self._cycle(["A", "B", "C", "A"], [0, 30, 60])  # 3 accounts < 4 in _CFG
+        assert detect_suspicious_cluster([cyc], "A", _CFG) == []
+
+    def test_cluster_duplicate_account_set_reported_once(self):
+        c1 = self._cycle(["A", "B", "C", "D", "A"], [0, 30, 60, 90])
+        c2 = self._cycle(["A", "B", "C", "D", "A"], [0, 31, 61, 91])
+        assert len(detect_suspicious_cluster([c1, c2], "A", _CFG)) == 1
 
     def test_cluster_empty_rows(self):
         result = detect_suspicious_cluster([], "A", _CFG)
@@ -673,8 +729,10 @@ class TestInsufficientEvidence:
 class TestAgent3Config:
     def test_default_values(self):
         cfg = Agent3Config()
-        assert cfg.min_layering_hops == 2
+        assert cfg.min_layering_hops == 3
         assert cfg.fan_in_min_sources == 3
+        assert cfg.fan_window_hours == 24.0
+        assert cfg.layering_min_amount_retention == 0.80
         assert cfg.rapid_forwarding_window_minutes == 120.0
 
     def test_from_env_uses_defaults_when_no_env(self, monkeypatch):
@@ -684,7 +742,7 @@ class TestAgent3Config:
         ]:
             monkeypatch.delenv(k, raising=False)
         cfg = Agent3Config.from_env()
-        assert cfg.max_layering_hops == 4
+        assert cfg.max_layering_hops == 5
         assert cfg.fan_in_min_sources == 3
 
     def test_from_env_reads_env_var(self, monkeypatch):
@@ -712,7 +770,7 @@ class TestAgent3OutputSchema:
     def test_finding_count_field(self):
         finding = NetworkFinding(
             pattern_type=NetworkPatternType.FAN_IN,
-            rule_id="AGENT3.FAN_IN.v1",
+            rule_id="AGENT3.FAN_IN.v2",
             subject_account_id="ACC_A",
             explanation="test",
         )
@@ -733,7 +791,7 @@ class TestAgent3OutputSchema:
         from pydantic import ValidationError
         f = NetworkFinding(
             pattern_type=NetworkPatternType.FAN_OUT,
-            rule_id="AGENT3.FAN_OUT.v1",
+            rule_id="AGENT3.FAN_OUT.v2",
             subject_account_id="ACC_A",
             explanation="test",
         )
@@ -761,7 +819,7 @@ class TestAgent3OutputSchema:
     def test_finding_has_query_timestamp(self):
         f = NetworkFinding(
             pattern_type=NetworkPatternType.FAN_IN,
-            rule_id="AGENT3.FAN_IN.v1",
+            rule_id="AGENT3.FAN_IN.v2",
             subject_account_id="A",
             explanation="test",
         )
@@ -808,14 +866,17 @@ def _make_mock_manager(
             r = MagicMock()
             r.single.return_value = {"count": count}
             return r
-        if "OPTIONAL MATCH (A)-[R:TRANSFERRED_TO]->(B" in c:
-            return _run_result(outgoing or [])
-        if "OPTIONAL MATCH (B:ACCOUNT)-[R:TRANSFERRED_TO]->(A" in c:
-            return _run_result(incoming or [])
-        if "UNION" in c:
-            return _run_result(cluster or [])
+        # v2 queries: data is attached to the sender (ACC_A) only
+        is_sender = kwargs.get("account_id") == "ACC_A"
+        if "R0:TRANSFERRED_TO" in c:
+            # forward layering query returns `paths`; backward returns nothing
+            return _run_result((paths or []) if "MATCH P = (R)" in c else [])
         if "TRANSFERRED_TO*" in c:
-            return _run_result(paths or [])
+            return _run_result((cluster or []) if is_sender else [])
+        if "-[R:TRANSFERRED_TO]->(B:ACCOUNT)" in c and "TIMESTAMP_UTC >=" in c:
+            return _run_result((outgoing or []) if is_sender else [])
+        if "(B:ACCOUNT)-[R:TRANSFERRED_TO]->(A:ACCOUNT" in c and "TIMESTAMP_UTC >=" in c:
+            return _run_result((incoming or []) if is_sender else [])
         # loader MERGE queries
         return _run_result([])
 
@@ -975,7 +1036,7 @@ class TestNetworkAnalyserAgentPipeline:
         assert len(rf) >= 1
 
     def test_structuring_detected_via_agent(self):
-        out = [_out_row("B", ts_offset_min=i * 60, tx_id=f"T{i}") for i in range(3)]
+        out = [_out_row("B", amount=49500, ts_offset_min=i * 60, tx_id=f"T{i}") for i in range(3)]
         mgr = _make_mock_manager(outgoing=out)
         agent = self._agent(mgr=mgr)
         result = agent.analyse(_make_tx())
@@ -991,22 +1052,22 @@ class TestFindingProvenanceAndExplainability:
     def test_layering_rule_id(self):
         paths = [_path_row(["A", "B", "C"], 2)]
         findings = detect_layering(paths, "A", _CFG)
-        assert findings[0].rule_id == "AGENT3.LAYERING.v1"
+        assert findings[0].rule_id == "AGENT3.LAYERING.v2"
 
     def test_fan_in_rule_id(self):
         inc = [_in_row(f"SRC{i}", tx_id=f"T{i}") for i in range(3)]
         findings = detect_fan_in(inc, "R", _CFG)
-        assert findings[0].rule_id == "AGENT3.FAN_IN.v1"
+        assert findings[0].rule_id == "AGENT3.FAN_IN.v2"
 
     def test_fan_out_rule_id(self):
         out = [_out_row(f"DST{i}", tx_id=f"T{i}") for i in range(3)]
         findings = detect_fan_out(out, "S", _CFG)
-        assert findings[0].rule_id == "AGENT3.FAN_OUT.v1"
+        assert findings[0].rule_id == "AGENT3.FAN_OUT.v2"
 
     def test_structuring_rule_id(self):
-        out = [_out_row("B", ts_offset_min=i * 60, tx_id=f"T{i}") for i in range(3)]
+        out = [_out_row("B", amount=49500, ts_offset_min=i * 60, tx_id=f"T{i}") for i in range(3)]
         findings = detect_structuring(out, "A", _CFG)
-        assert findings[0].rule_id == "AGENT3.STRUCTURING.v1"
+        assert findings[0].rule_id == "AGENT3.STRUCTURING.v2"
 
     def test_detection_parameters_preserved(self):
         inc = [_in_row(f"SRC{i}", tx_id=f"T{i}") for i in range(3)]

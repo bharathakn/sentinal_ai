@@ -30,6 +30,32 @@ it to Agent 2 (Evidence Gatherer) for downstream risk analysis.
 No real banking, KYC, sanctions, device, or geolocation systems are integrated.
 Sanctions results are entirely synthetic. No real OFAC, UN, or RBI lists are consulted.
 
+## Evidence Backends (Phase 9.5)
+
+Providers read entity data through `src/evidence/data_store.py`:
+
+| Backend | `SENTINEL_EVIDENCE_BACKEND` | Data | Source names |
+|---|---|---|---|
+| Fixture (default) | `fixture` | Hand-written fixtures ACC001–ACC004 (unit tests) | `MOCK_*` |
+| India synthetic | `india_synthetic` | `dataset/processed/custom_india/` v2 | `SYNTHETIC_INDIA_*` |
+
+Both report `source_mode = MOCK`.
+
+**Point-in-time rule (India backend):** Agent 2 passes the transaction
+timestamp as `as_of`. History, 30-day statistics, known beneficiaries, linked
+accounts and device usage only include transactions strictly before it.
+Known beneficiaries = prior payees plus registered beneficiaries added at
+least 30 days earlier.
+
+**Label firewall:** the India store never reads `transactions_targets.csv`.
+It has no fraud-flag registry, so `previous_fraud_flag` is False with a
+"not determinable" warning.
+
+**Sanctions name screening:** when the transaction carries no sender name,
+Agent 2 screens the KYC customer name and records a warning. Sanctions
+screening still uses the synthetic watchlist; the real OFAC/UN snapshots in
+`dataset/raw/sanctions/` are not used yet (roadmap backlog).
+
 ## Synthetic Data — Single Source of Truth
 
 All mock providers read from **`src/evidence/fixture_data.py`**.

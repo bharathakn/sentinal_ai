@@ -58,6 +58,9 @@ class ScoringMode(str, Enum):
     RAW_FEATURES = "RAW_FEATURES"
     """Scored with a full or partial IEEE-CIS feature dict (bypasses mapper)."""
 
+    INDIA_NATIVE = "INDIA_NATIVE"
+    """Scored by the India behavioural model on its own feature set (Phase 9.5)."""
+
 
 # ---------------------------------------------------------------------------
 # Sub-models
@@ -74,7 +77,7 @@ class DeviationFeature(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    feature: str = Field(description="IEEE-CIS feature name.")
+    feature: str = Field(description="Model feature name (IEEE-CIS or India behavioural).")
     shap_value: float = Field(
         description=(
             "SHAP attribution value. Positive values push the prediction "

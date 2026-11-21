@@ -575,8 +575,20 @@ class TestMissingIdentifiers:
         )
         assert dev_pr.status == EvidenceStatus.VALIDATION_ERROR
 
-    def test_missing_customer_name_produces_validation_error_for_sanctions_subject(self):
+    def test_missing_customer_name_falls_back_to_kyc_name(self):
+        # Phase 9.5: when the transaction carries no sender name, the KYC
+        # customer name is screened instead.
         tx = _make_transaction(customer_name=None)
+        result = _run(_make_agent().gather(tx, _make_agent1()))
+        subj_pr = next(
+            pr for pr in result.provider_results if pr.provider_name == "SANCTIONS_SUBJECT"
+        )
+        assert subj_pr.status == EvidenceStatus.NO_MATCH
+        assert result.sanctions_subject.data.subject_query == "Arjun Sharma (SYNTHETIC)"
+        assert any("KYC customer name" in w for w in result.warnings)
+
+    def test_missing_name_and_unknown_kyc_produces_validation_error(self):
+        tx = _make_transaction(customer_name=None, sender_account_id="ACC_UNKNOWN")
         result = _run(_make_agent().gather(tx, _make_agent1()))
         subj_pr = next(
             pr for pr in result.provider_results if pr.provider_name == "SANCTIONS_SUBJECT"

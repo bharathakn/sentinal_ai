@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..fixture_data import get_account, SYNTHETIC_DATA_NOTICE
+from ..data_store import get_store
 from ..schemas import (
     EvidenceStatus,
     KYCData,
@@ -10,19 +10,21 @@ from ..schemas import (
     SourceMode,
 )
 
-_SOURCE = "MOCK_KYC"
+_SOURCE_SUFFIX = "KYC"
 
 
 def get_kyc_data(account_id: str) -> KYCResponse:
     """Return synthetic KYC customer profile for the requested account."""
-    account = get_account(account_id)
+    store = get_store()
+    _SOURCE = f"{store.source_prefix}_{_SOURCE_SUFFIX}"
+    account = store.get_account(account_id)
     if account is None:
         return KYCResponse(
             source=_SOURCE,
             source_mode=SourceMode.MOCK,
             status=EvidenceStatus.NOT_FOUND,
             requested_entity_id=account_id,
-            warnings=[f"Account '{account_id}' not found in mock KYC fixture."],
+            warnings=[f"Account '{account_id}' not found in KYC records."],
         )
 
     data = KYCData(
@@ -38,7 +40,7 @@ def get_kyc_data(account_id: str) -> KYCResponse:
         registered_city=account.get("registered_city"),
         registered_state=account.get("registered_state"),
         registered_country=account.get("registered_country"),
-        synthetic_notice=SYNTHETIC_DATA_NOTICE,
+        synthetic_notice=store.synthetic_notice,
     )
 
     return KYCResponse(

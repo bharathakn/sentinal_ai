@@ -176,6 +176,11 @@ def extract_new_device(tx: CanonicalTransaction, agent2: Any) -> SignalResult:
 # ---------------------------------------------------------------------------
 # NEW_BENEFICIARY
 # ---------------------------------------------------------------------------
+# Relationship novelty comes from the sender's side (transaction flag, sender's
+# known beneficiaries). The beneficiary record contributes beneficiary RISK
+# (prior fraud flag, young account). The beneficiary's own transaction count
+# is NOT used: it says nothing about this sender's relationship and is
+# misleading when available history is short.
 
 def extract_new_beneficiary(tx: CanonicalTransaction, agent2: Any,
                             cfg: Agent4Config) -> SignalResult:
@@ -194,9 +199,6 @@ def extract_new_beneficiary(tx: CanonicalTransaction, agent2: Any,
         if b.previous_fraud_flag:
             ind.append(_Indicator(1.0, "beneficiary previously flagged for fraud",
                                   _evidence_ref(ben, f"account_id={b.account_id}")))
-        elif b.known_transaction_count == 0:
-            ind.append(_Indicator(1.0, "beneficiary has no known prior transactions",
-                                  _evidence_ref(ben, f"account_id={b.account_id}")))
         elif (b.account_age_days is not None
               and b.account_age_days < cfg.new_beneficiary_account_age_days):
             ind.append(_Indicator(
@@ -205,7 +207,7 @@ def extract_new_beneficiary(tx: CanonicalTransaction, agent2: Any,
                  f"< {cfg.new_beneficiary_account_age_days}d"),
                 _evidence_ref(ben, f"account_id={b.account_id}")))
         else:
-            ind.append(_Indicator(0.0, "beneficiary established with prior transactions",
+            ind.append(_Indicator(0.0, "beneficiary account established; no prior fraud flag",
                                   _evidence_ref(ben, f"account_id={b.account_id}")))
     elif ben is not None and ben.status == EvidenceStatus.NOT_FOUND:
         ind.append(_Indicator(1.0, "beneficiary not found in beneficiary records",

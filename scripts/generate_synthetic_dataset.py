@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 # Ensure project root is in python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.data.synthetic_india_generator import SyntheticIndiaDatasetGenerator
+from src.data.synthetic_india_generator import GENERATOR_VERSION, SyntheticIndiaDatasetGenerator
 from src.data.validate_synthetic_dataset import SyntheticDatasetValidator
 
 
@@ -64,7 +64,7 @@ def main():
 
     metadata = {
         "dataset_name": "Custom Synthetic India Dataset",
-        "version": "1.0.0",
+        "version": GENERATOR_VERSION,
         "generation_timestamp": datetime.now(timezone.utc).isoformat(),
         "random_seed": args.seed,
         "total_transactions": len(data_dict["transactions_features"]),

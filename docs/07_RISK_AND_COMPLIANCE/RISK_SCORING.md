@@ -85,13 +85,43 @@ requiring qualified human review, never a filing.
 | Default value for an Agent 3 finding with no heuristic score | 0.5 |
 | Signal value that raises a regulatory trigger | ≥ 0.5 |
 
-## Known limitation
+## Signal notes
 
-Agent 1 runs in `CANONICAL_MAPPED` mode for non-IEEE-CIS transactions, with
-most model features imputed (`COMPATIBILITY_WARNING`). Its score is then
-nearly constant across transactions, so ANOMALY contributes little
-discrimination for mock / India-synthetic cases. Confidence is capped at
-MEDIUM in that situation.
+- NEW_BENEFICIARY relationship novelty comes from the sender's side
+  (transaction flag; sender's known beneficiaries). The beneficiary record adds
+  beneficiary risk (prior fraud flag → 1.0; account younger than 30 days →
+  0.5). The beneficiary's own transaction count is not used.
+
+## Evaluation (Phase 9.5, proposed config 0.1.0)
+
+`scripts/evaluate_pipeline.py` ran Agents 1–4 on 575 labelled India v2
+transactions (300 legitimate + 25 per suspicious scenario). Labels were joined
+only after the agents ran. All 1,725 upstream agent runs were COMPLETE.
+
+| Dataset label | CLEAR | MONITOR | ESCALATE | BLOCK |
+|---|---|---|---|---|
+| LEGITIMATE (300) | 86.7% | 13.3% | 0.0% | 0.0% |
+| FRAUDULENT (194) | 3.1% | 13.9% | 81.4% | 1.5% |
+| BORDERLINE (81) | 19.8% | 45.7% | 34.6% | 0.0% |
+
+| Scenario | Mean score | ESCALATE/BLOCK |
+|---|---|---|
+| Normal | 13.2 | 0% |
+| High-value spike | 27.9 | **0%** |
+| Borderline travel | 34.1 | 20% |
+| Impossible travel / New beneficiary large | ~51 | 60% |
+| Mule / Ring | 54–56 | 84% |
+| Rapid burst / Structuring / Layering / New device / Shared device | 60–64 | 76–100% |
+
+Observations for the approval decision:
+
+1. No legitimate case reached ESCALATE or BLOCK; 13% reached MONITOR.
+2. **High-value spikes never escalate.** Only ANOMALY fires (weight 0.30), so
+   the score is capped near 30. Whether an 8–15× spike to an established payee
+   should escalate on its own is a policy decision.
+3. BLOCK is reached only via score ≥ 75 or a sanctions match; the India
+   dataset contains no sanctions matches.
+4. Results are on SYNTHETIC data and are not real-world performance.
 
 ## Important
 

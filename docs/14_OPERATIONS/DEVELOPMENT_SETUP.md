@@ -62,11 +62,30 @@ docker run -d --name sentinel-neo4j --restart unless-stopped \
 ```
 
 Set in `.env`: `NEO4J_URI=bolt://localhost:7687`, `NEO4J_USERNAME=neo4j`,
-`NEO4J_PASSWORD=<password>`, `NEO4J_DATABASE=neo4j`. Load the sample graph:
+`NEO4J_PASSWORD=<password>`, `NEO4J_DATABASE=neo4j`.
+
+## Rebuild the India investigation world
 
 ```bash
-PYTHONPATH=. .venv/bin/python scripts/load_india_sample_graph.py
+# 1. Generate the India synthetic dataset v2 (validated; ~2 s)
+PYTHONPATH=. .venv/bin/python scripts/generate_synthetic_dataset.py
+# 2. Train the India behavioural model for Agent 1 (~5 s)
+PYTHONPATH=. .venv/bin/python scripts/train_india_model.py
+# 3. Load all transactions into Neo4j (labels are never loaded; ~1 min)
+PYTHONPATH=. .venv/bin/python scripts/load_india_sample_graph.py --reset-india
 ```
+
+## Run investigations
+
+```bash
+# One transaction through Agents 1–4 (prints the dataset label for comparison only)
+PYTHONPATH=. .venv/bin/python scripts/run_investigation.py TXN_IND_202608_000977
+# End-to-end evaluation on a labelled sample (~30 s)
+PYTHONPATH=. .venv/bin/python scripts/evaluate_pipeline.py
+```
+
+These scripts use `SENTINEL_EVIDENCE_BACKEND=india_synthetic` by default.
+Unit tests use the `fixture` backend.
 
 Browser UI: http://localhost:7474
 
@@ -76,7 +95,7 @@ Browser UI: http://localhost:7474
 .venv/bin/python -m pytest tests/ -q
 ```
 
-851 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`; the
+897 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`; the
 29 live Neo4j integration tests skip when those are not set. The Agent 4
 regulatory-excerpt provenance test needs `pdftotext` (poppler-utils) and
 skips without it.

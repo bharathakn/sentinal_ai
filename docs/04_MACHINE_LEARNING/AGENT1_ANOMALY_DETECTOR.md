@@ -108,6 +108,14 @@ This does NOT fit any parameter on the test set.
 
 ---
 
+## India-native scoring (Phase 9.5)
+
+`INDIA_SYNTHETIC` transactions are scored by the India behavioural model
+(`ScoringMode.INDIA_NATIVE`, 12 features, status COMPLETE when all features
+and SHAP are available). See `INDIA_BEHAVIOUR_MODEL.md`. The IEEE-CIS
+low-coverage limitation below applies only to non-India, non-IEEE-CIS input
+or when the India model artifacts are missing (fallback with a warning).
+
 ## Feature Compatibility
 
 ### Mapped Features (5 of 432)

@@ -26,7 +26,10 @@ Rules
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
+from uuid import uuid4
+
 from typing_extensions import TypedDict
 
 from ..schemas.canonical_transaction import CanonicalTransaction
@@ -41,7 +44,10 @@ class SentinelState(TypedDict, total=False):
 
     Fields
     ------
-    transaction   : The canonical transaction being investigated. Required.
+    case_id       : Investigation case identifier (set by new_case_state).
+    case_created_at_utc : When the case was opened (UTC).
+    transaction   : The canonical transaction being investigated, with
+                    ground-truth label fields removed. Required.
     agent1_output : Output from Agent 1 (Anomaly Detector). Set after Agent 1.
     agent2_output : Output from Agent 2 (Evidence Gatherer). Set after Agent 2.
     agent3_output : Output from Agent 3 (Network Analyser). Set after Agent 3.
@@ -50,9 +56,55 @@ class SentinelState(TypedDict, total=False):
     Agent 5 field is reserved for a future phase.
     """
 
+    case_id: str
+    case_created_at_utc: datetime
     transaction: CanonicalTransaction
     agent1_output: Optional[Agent1Output]
     agent2_output: Optional[Agent2Output]
     agent3_output: Optional[Agent3Output]
     agent4_output: Optional[Agent4Output]
     # agent5_output: Optional[Agent5Output]   # Phase 10: Explanation Generator
+
+
+# ---------------------------------------------------------------------------
+# Case entry point + label firewall (Phase 9.5)
+# ---------------------------------------------------------------------------
+
+GROUND_TRUTH_FIELDS = ("is_fraud", "metadata.risk_label", "metadata.scenario_id")
+"""Dataset ground-truth labels. Evaluation code may read them; agents may not.
+
+`metadata.is_flagged_fraud` and `metadata.alert_id` are NOT ground truth: they
+describe the monitoring alert that opened the case and are kept.
+"""
+
+
+def strip_ground_truth(transaction: CanonicalTransaction) -> CanonicalTransaction:
+    """Return a copy of the transaction with ground-truth label fields cleared."""
+    update: dict = {"is_fraud": None}
+    if transaction.metadata is not None:
+        update["metadata"] = transaction.metadata.model_copy(
+            update={"risk_label": None, "scenario_id": None}
+        )
+    return transaction.model_copy(update=update)
+
+
+def new_case_id() -> str:
+    return f"CASE-{uuid4().hex[:12].upper()}"
+
+
+def new_case_state(
+    transaction: CanonicalTransaction,
+    case_id: Optional[str] = None,
+    created_at: Optional[datetime] = None,
+) -> SentinelState:
+    """Create the initial pipeline state for an investigation.
+
+    This is the ONLY supported entry point into the agent pipeline: it assigns
+    the case identity and applies the label firewall, so no agent (and no LLM
+    prompt built from agent outputs) can see dataset ground truth.
+    """
+    return SentinelState(
+        case_id=case_id or new_case_id(),
+        case_created_at_utc=created_at or datetime.now(timezone.utc),
+        transaction=strip_ground_truth(transaction),
+    )

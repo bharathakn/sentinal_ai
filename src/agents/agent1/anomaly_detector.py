@@ -190,6 +190,8 @@ class AnomalyDetectorAgent:
         xgb_weight: float = _DEFAULT_XGB_WEIGHT,
         if_weight: float = _DEFAULT_IF_WEIGHT,
         top_n_shap: int = 10,
+        india_model_dir: Optional[str] = None,
+        use_india_model: bool = True,
     ) -> None:
         # Validate weights
         if not math.isclose(xgb_weight + if_weight, 1.0, rel_tol=1e-6):
@@ -238,6 +240,21 @@ class AnomalyDetectorAgent:
             self._if_predictor.metadata.get("model_version"),
         )
 
+        # --- Optional India-native behavioural model (Phase 9.5) ---
+        # Missing artifacts are NOT fatal: India transactions then fall back
+        # to the IEEE-CIS canonical-mapped path with a coverage warning.
+        self._india_scorer: Any = None
+        self._india_load_error: Optional[str] = None
+        if use_india_model:
+            try:
+                from ...ml.india_behaviour_model import DEFAULT_MODEL_DIR, IndiaBehaviourScorer
+                self._india_scorer = IndiaBehaviourScorer(
+                    india_model_dir if india_model_dir is not None else DEFAULT_MODEL_DIR
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._india_load_error = f"{type(exc).__name__}: {exc}"
+                logger.info("India behaviour model not loaded: %s", self._india_load_error)
+
         logger.info(
             "AnomalyDetectorAgent initialised. XGBoost version=%s, IF version=%s.",
             self._xgb_predictor.metadata.get("model_version"),
@@ -272,7 +289,18 @@ class AnomalyDetectorAgent:
 
         # --- Extract provenance ---
         tx_id = str(transaction.raw_record_id) if transaction.raw_record_id else None
-        source_ds = str(transaction.source_dataset) if transaction.source_dataset else None
+        source_ds = str(getattr(transaction.source_dataset, "value", transaction.source_dataset)) \
+            if transaction.source_dataset else None
+
+        # --- Route India transactions to the India-native model ---
+        if source_ds == "INDIA_SYNTHETIC":
+            if self._india_scorer is not None:
+                return self._score_india(transaction, tx_id, source_ds, scored_at)
+            warnings.append(
+                "India behaviour model unavailable "
+                f"({self._india_load_error or 'disabled'}); falling back to IEEE-CIS "
+                "canonical mapping with low feature coverage."
+            )
 
         # --- Feature extraction ---
         xgb_features = canonical_to_xgb_features(transaction)
@@ -487,6 +515,80 @@ class AnomalyDetectorAgent:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _score_india(self, transaction, tx_id, source_ds, scored_at) -> Agent1Output:
+        """Score with the India behavioural model (ScoringMode.INDIA_NATIVE)."""
+        from ...ml.india_behaviour_model import FEATURES, feature_coverage
+
+        warnings: list[str] = []
+        errors: list[str] = []
+        try:
+            r = self._india_scorer.score(transaction, top_n=self._top_n_shap)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("India model scoring failed: %s", exc)
+            return Agent1Output(
+                transaction_id=tx_id, source_dataset=source_ds, scored_at_utc=scored_at,
+                status=AgentStatus.FAILED, errors=[f"India model inference error: {type(exc).__name__}"],
+            )
+        feats = r["features"]
+        n_mapped = feature_coverage(feats)
+        mapping = FeatureMappingInfo(
+            scoring_mode=ScoringMode.INDIA_NATIVE,
+            n_features_mapped=n_mapped,
+            total_model_features=len(FEATURES),
+            n_nan_imputed=len(FEATURES) - n_mapped,
+            mapped_fields=[k for k, v in feats.items() if v == v],
+            mapping_warning=None if n_mapped == len(FEATURES) else
+            f"{len(FEATURES) - n_mapped} of {len(FEATURES)} India behavioural features unavailable.",
+        )
+        prob = r["fraud_probability"]
+        xgb_detail = XGBoostDetail(
+            fraud_probability=prob,
+            is_fraud_predicted=prob >= r["xgb_threshold"],
+            threshold_used=r["xgb_threshold"],
+            model_version=r["model_version"],
+            note=("India behavioural XGBoost trained on SYNTHETIC labels. Statistical "
+                  "signal only, not proof of fraud."),
+        )
+        if_detail = IsolationForestDetail(
+            anomaly_score=r["if_anomaly_score"],
+            is_anomaly=r["if_anomaly_score"] >= r["if_threshold"],
+            threshold_used=r["if_threshold"],
+            model_version=r["model_version"],
+            score_note="Isolation Forest anomaly score (higher = more unusual). Not a probability.",
+        )
+        combined = _compute_combined_confidence(
+            xgb_prob=prob, if_anomaly_score=r["if_anomaly_score"],
+            xgb_weight=self._xgb_weight, if_weight=self._if_weight, if_threshold=r["if_threshold"],
+        )
+        shap = r["shap"]
+        if shap is None:
+            warnings.append("SHAP explanation unavailable for India model.")
+        if mapping.mapping_warning:
+            warnings.append(mapping.mapping_warning)
+        status = AgentStatus.COMPLETE if (shap is not None and n_mapped == len(FEATURES)) else AgentStatus.PARTIAL
+        return Agent1Output(
+            transaction_id=tx_id,
+            source_dataset=source_ds,
+            scored_at_utc=scored_at,
+            status=status,
+            warnings=warnings,
+            errors=errors,
+            anomaly_score=prob,
+            isolation_score=r["if_anomaly_score"],
+            combined_confidence=combined,
+            top_deviation_features=self._build_deviation_features(shap, feats),
+            xgboost_detail=xgb_detail,
+            isolation_forest_detail=if_detail,
+            shap_available=shap is not None,
+            shap_base_value=shap.get("base_value") if shap else None,
+            shap_sum=shap.get("shap_sum") if shap else None,
+            feature_mapping=mapping,
+            combined_confidence_note=COMBINED_CONFIDENCE_NOTE + (
+                " For INDIA_NATIVE scoring the IF sigmoid is centred on the India "
+                "model's calibrated IF threshold."
+            ),
+        )
 
     def _run_xgboost(
         self,
