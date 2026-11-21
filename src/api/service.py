@@ -189,7 +189,7 @@ class CaseService:
             self._pending -= 1
 
     # -- ingestion ------------------------------------------------------
-    def ingest(self, req: AlertRequest) -> tuple[AlertAccepted, Optional[Future]]:
+    def ingest(self, req: AlertRequest, submitted_by: str = SYSTEM) -> tuple[AlertAccepted, Optional[Future]]:
         if req.transaction is not None:
             tx, source = req.transaction, AlertSource.API
         else:
@@ -215,7 +215,7 @@ class CaseService:
             record = CaseRecord(
                 case_id=new_case_id(), transaction_key=key, status=CaseStatus.RECEIVED,
                 created_at_utc=now, updated_at_utc=now, alert=alert, transaction=tx.model_dump(mode="json"),
-                audit_trail=[AuditEvent(event_type=AuditEventType.CASE_CREATED, actor=SYSTEM, at_utc=now,
+                audit_trail=[AuditEvent(event_type=AuditEventType.CASE_CREATED, actor=submitted_by, at_utc=now,
                                         details={"alert_id": alert.alert_id, "source": source.value,
                                                  "source_system": req.source_system,
                                                  "transaction_id": tx.raw_record_id})],
@@ -258,7 +258,8 @@ class CaseService:
         )
 
     # -- analyst decision ----------------------------------------------
-    def decide(self, case_id: str, req: DecisionRequest) -> CaseRecord:
+    def decide(self, case_id: str, req: DecisionRequest, analyst_id: str,
+               analyst_name: Optional[str] = None) -> CaseRecord:
         rec = self.store.get(case_id)
         if rec is None:
             raise NotFound(f"Case {case_id} not found.")
@@ -269,15 +270,16 @@ class CaseService:
         prev = rec.analyst_decision
         recommended = s.recommended_action
         decision = AnalystDecision(
-            analyst_id=req.analyst_id, analyst_name=req.analyst_name, action=req.action, rationale=req.rationale,
+            analyst_id=analyst_id, analyst_name=analyst_name, action=req.action, rationale=req.rationale,
             system_recommended_action=recommended, system_risk_score=s.risk_score,
             report_run_id=report.get("agent5_run_id"), report_validation_status=s.validation_status,
             agrees_with_system=(req.action.value == recommended)
             if recommended in {a.value for a in AnalystAction} else None,
             supersedes_decision_id=prev.decision_id if prev else None,
         )
-        event = AuditEvent(event_type=AuditEventType.ANALYST_DECISION, actor=req.analyst_id, details={
-            "decision_id": decision.decision_id, "action": req.action.value, "analyst_name": req.analyst_name,
+        event = AuditEvent(event_type=AuditEventType.ANALYST_DECISION, actor=analyst_id, details={
+            "decision_id": decision.decision_id, "action": req.action.value, "analyst_name": analyst_name,
+            "authenticated": True,
             "system_recommended_action": recommended, "system_risk_score": s.risk_score,
             "report_validation_status": s.validation_status,
             "supersedes_decision_id": decision.supersedes_decision_id,

@@ -3,13 +3,21 @@ Sentinel AI — Phase 13: investigation API.
 
 Endpoints
 ---------
-GET  /health                              liveness + store / investigator readiness
+GET  /health                              liveness + store / investigator readiness (public)
+POST /api/v1/auth/login                   sign in (sets an HttpOnly session cookie)
+POST /api/v1/auth/logout                  sign out
+GET  /api/v1/auth/me                      current analyst
+POST /api/v1/auth/password                change own password
 POST /api/v1/alerts                       ingest an alert → case (202; ?wait=true blocks until investigated)
 GET  /api/v1/cases                        case queue (priority order; ?status= &action= &limit= &offset=)
 GET  /api/v1/cases/{case_id}              full case: transaction, agent outputs, report, validation, audit
 GET  /api/v1/cases/{case_id}/report       presented report (JSON, or ?format=markdown)
 GET  /api/v1/cases/{case_id}/audit        audit trail
 POST /api/v1/cases/{case_id}/decision     analyst decision (appended; revisions kept)
+
+Every /api/v1 endpoint except login needs a signed-in analyst (session
+cookie). Alert ingestion alternatively accepts ``X-API-Key`` when
+``SENTINEL_INGEST_API_KEY`` is set (server-side alert sources).
 
 ``create_app`` has no side effects at import, so tests can build an app with a
 temporary store and fake agents. ``src/api/main.py`` is the server entry point.
@@ -22,10 +30,14 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from .auth import (
+    COOKIE_NAME, AuthError, AuthService, AuthStore, LoginLocked, LoginRequest, PasswordChangeRequest, PublicUser,
+    User, auth_store_from_env,
+)
 from .case_schema import (
     PROTOTYPE_NOTICE, AlertAccepted, AlertRequest, AuditEvent, CaseList, CaseListItem, CaseRecord, CaseStatus,
     DecisionRequest,
@@ -62,8 +74,12 @@ def create_app(
     feed_lookup: Optional[Callable[[str], Optional[dict]]] = None,
     ingest_api_key: Optional[str] = None,
     alert_wait_seconds: Optional[float] = None,
+    auth_store: Optional[AuthStore] = None,
+    cookie_secure: Optional[bool] = None,
 ) -> FastAPI:
     ingest_key = ingest_api_key if ingest_api_key is not None else os.environ.get("SENTINEL_INGEST_API_KEY", "")
+    secure = cookie_secure if cookie_secure is not None else (
+        os.environ.get("SENTINEL_COOKIE_SECURE", "true").strip().lower() != "false")
     wait_seconds = alert_wait_seconds if alert_wait_seconds is not None else float(
         os.environ.get("SENTINEL_ALERT_WAIT_SECONDS", "180"))
 
@@ -77,6 +93,7 @@ def create_app(
         service = CaseService(store or case_store_from_env(), **kwargs)
         service.start()
         app.state.service = service
+        app.state.auth = AuthService(auth_store or auth_store_from_env())
         yield
         service.shutdown()
 
@@ -102,6 +119,15 @@ def create_app(
         return JSONResponse(status_code=429, content={"detail": "Investigation queue is full; retry later."},
                             headers={"Retry-After": "60"})
 
+    @app.exception_handler(AuthError)
+    async def _auth(_: Request, exc: AuthError):
+        return JSONResponse(status_code=401, content={"detail": str(exc)})
+
+    @app.exception_handler(LoginLocked)
+    async def _locked(_: Request, exc: LoginLocked):
+        return JSONResponse(status_code=429, content={"detail": str(exc)},
+                            headers={"Retry-After": str(exc.retry_after)})
+
     @app.exception_handler(FeedUnavailable)
     async def _feed(_: Request, exc: FeedUnavailable):
         return JSONResponse(status_code=503, content={"detail": str(exc)})
@@ -114,9 +140,54 @@ def create_app(
     def service(request: Request) -> CaseService:
         return request.app.state.service
 
-    def require_ingest_key(x_api_key: Optional[str] = Header(default=None)) -> None:
-        if ingest_key and not (x_api_key and hmac.compare_digest(x_api_key, ingest_key)):
-            raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key.")
+    def auth(request: Request) -> AuthService:
+        return request.app.state.auth
+
+    def current(request: Request, session_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME)):
+        return request.app.state.auth.authenticate(session_token)
+
+    def analyst(cur=Depends(current)) -> User:
+        return cur[0]
+
+    def alert_submitter(request: Request, x_api_key: Optional[str] = Header(default=None),
+                        session_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME)) -> str:
+        """A signed-in analyst, or a server-side source holding the ingest key."""
+        if x_api_key is not None:
+            if ingest_key and hmac.compare_digest(x_api_key, ingest_key):
+                return "ingest-api-key"
+            raise HTTPException(status_code=401, detail="Invalid X-API-Key.")
+        return request.app.state.auth.authenticate(session_token)[0].username
+
+    # ------------------------------------------------------------------
+    @app.post("/api/v1/auth/login", response_model=PublicUser)
+    def login(body: LoginRequest, response: Response, svc: AuthService = Depends(auth)):
+        token, user, session = svc.login(body)
+        response.set_cookie(
+            COOKIE_NAME, token, httponly=True, secure=secure, samesite="lax", path="/",
+            max_age=int((session.absolute_expires_at_utc - session.created_at_utc).total_seconds())
+            if body.remember else None,
+        )
+        return PublicUser(username=user.username, display_name=user.display_name)
+
+    @app.post("/api/v1/auth/logout", status_code=204)
+    def logout(response: Response, svc: AuthService = Depends(auth),
+               session_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME)):
+        svc.logout(session_token)
+        response.delete_cookie(COOKIE_NAME, path="/", secure=secure, httponly=True, samesite="lax")
+        response.status_code = 204
+        return response
+
+    @app.get("/api/v1/auth/me", response_model=PublicUser)
+    def me(user: User = Depends(analyst)):
+        return PublicUser(username=user.username, display_name=user.display_name)
+
+    @app.post("/api/v1/auth/password", status_code=204)
+    def change_password(body: PasswordChangeRequest, cur=Depends(current), svc: AuthService = Depends(auth)):
+        try:
+            svc.change_password(cur[0], cur[1], body)
+        except ValueError as exc:  # password policy
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return Response(status_code=204)
 
     # ------------------------------------------------------------------
     @app.get("/health")
@@ -136,11 +207,10 @@ def create_app(
             "prototype_notice": PROTOTYPE_NOTICE,
         }
 
-    @app.post("/api/v1/alerts", response_model=AlertAccepted, status_code=202,
-              dependencies=[Depends(require_ingest_key)])
+    @app.post("/api/v1/alerts", response_model=AlertAccepted, status_code=202)
     def ingest_alert(alert: AlertRequest, wait: bool = Query(False, description="Block until the investigation ends."),
-                     svc: CaseService = Depends(service)):
-        accepted, fut = svc.ingest(alert)
+                     svc: CaseService = Depends(service), submitted_by: str = Depends(alert_submitter)):
+        accepted, fut = svc.ingest(alert, submitted_by=submitted_by)
         if accepted.duplicate:
             return JSONResponse(status_code=200, content=accepted.model_dump(mode="json"))
         if wait and fut is not None:
@@ -157,7 +227,7 @@ def create_app(
     @app.get("/api/v1/cases", response_model=CaseList)
     def list_cases(status: Optional[CaseStatus] = None, action: Optional[str] = Query(None, max_length=32),
                    limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                   svc: CaseService = Depends(service)):
+                   svc: CaseService = Depends(service), _: User = Depends(analyst)):
         docs, total = svc.store.list(status=status, action=action, limit=limit, offset=offset)
         items = []
         for d in docs:
@@ -172,12 +242,12 @@ def create_app(
         return CaseList(total=total, limit=limit, offset=offset, items=items)
 
     @app.get("/api/v1/cases/{case_id}", response_model=CaseRecord)
-    def get_case(case_id: str, svc: CaseService = Depends(service)):
+    def get_case(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
         return svc.get(case_id)
 
     @app.get("/api/v1/cases/{case_id}/report")
     def get_report(case_id: str, format: str = Query("json", pattern="^(json|markdown)$"),
-                   svc: CaseService = Depends(service)):
+                   svc: CaseService = Depends(service), _: User = Depends(analyst)):
         rec = svc.get(case_id)
         inv = rec.investigation or {}
         if not inv.get("agent5_output"):
@@ -195,12 +265,13 @@ def create_app(
         return PlainTextResponse(render_markdown(report, validation=validation), media_type="text/markdown")
 
     @app.get("/api/v1/cases/{case_id}/audit", response_model=list[AuditEvent])
-    def get_audit(case_id: str, svc: CaseService = Depends(service)):
+    def get_audit(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
         return svc.get(case_id).audit_trail
 
     @app.post("/api/v1/cases/{case_id}/decision", response_model=CaseRecord)
-    def decide(case_id: str, decision: DecisionRequest, svc: CaseService = Depends(service)):
-        return svc.decide(case_id, decision)
+    def decide(case_id: str, decision: DecisionRequest, svc: CaseService = Depends(service),
+               user: User = Depends(analyst)):
+        return svc.decide(case_id, decision, analyst_id=user.username, analyst_name=user.display_name)
 
     return app
 

@@ -32,7 +32,8 @@ Phase 13 complete: FastAPI investigation API (`src/api/`). Alerts create
 cases, which are investigated on one background worker and stored in a case
 store: JSON files locally, MongoDB Atlas when hosted. Analysts read the
 priority queue, case detail, report and audit trail, and record decisions,
-which are revisable and audited. Verified end to end on AuraDB + Atlas.
+which are revisable and audited. Analysts sign in (Phase 13.1) and stay
+signed in for up to 30 days. Verified end to end on AuraDB + Atlas.
 Next: Phase 14, the React analyst dashboard.
 
 Phase 12 complete: the investigation runs as a LangGraph `StateGraph`
@@ -64,6 +65,18 @@ End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
 
 Deployment target (Vercel + Render) recorded in
 `docs/14_OPERATIONS/DEPLOYMENT.md`; deploy-compatibility groundwork is done.
+
+## Phase 13.1 summary (analyst sign-in)
+
+- `src/api/auth.py`: username/password sign-in; sessions last 7 days idle,
+  30 days max, so analysts rarely sign in again. HttpOnly cookie; only the
+  token hash is stored. 5-failure lockout. Sign-out, disable and password
+  change revoke sessions.
+- All case endpoints require sign-in. Decisions and ingestions are
+  attributed to the signed-in user. Ingestion alternatively accepts the
+  server-side ingest key.
+- Accounts: `scripts/manage_users.py` (no public sign-up).
+- Tests: `tests/test_auth.py` (+ MongoDB auth store live on Atlas).
 
 ## Phase 13 summary
 
@@ -147,8 +160,8 @@ Deployment target (Vercel + Render) recorded in
 
 - Supply the current RBI direction and PMLA / FIU-IND PDFs to restore India
   mappings.
-- Analyst authentication: the prototype records a self-declared analyst id.
-  Decide whether the demo needs a login (e.g. SSO/OIDC) before deployment.
+- Create the real analyst accounts on Atlas before the demo
+  (`scripts/manage_users.py`, see `docs/14_OPERATIONS/DEPLOYMENT.md`).
 
 ## Known limitations
 

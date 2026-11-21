@@ -43,6 +43,8 @@ production differ only in environment variables:
 | `SENTINEL_CORS_ORIGINS` | default localhost dev servers | the Vercel origin, e.g. `https://<app>.vercel.app` |
 | `SENTINEL_INGEST_API_KEY` | empty (open) | a random secret if alerts come from a server-side source |
 | `LANGSMITH_TRACING` | `false` | `false` |
+| `SENTINEL_COOKIE_SECURE` | `true` (`false` only for plain-http clients other than localhost browsers) | `true` |
+| `SENTINEL_SESSION_IDLE_DAYS` / `SENTINEL_SESSION_MAX_DAYS` | `7` / `30` | same |
 
 The Neo4j driver accepts `bolt://`, `neo4j://` and `neo4j+s://` URIs, so
 switching to AuraDB needs no code change. Credentials are never committed;
@@ -66,6 +68,26 @@ The IEEE-CIS models need the 1.8 GB raw Kaggle dataset and are not deployed.
 transactions use the India-native model. If an IEEE-CIS transaction were
 submitted, Agent 1 would return a structured `FAILED` output rather than
 crashing.
+
+## Sign-in on the hosted deployment
+
+- **Proxy the API through Vercel.** The Vercel app proxies the API with a
+  rewrite in `vercel.json`, so the session cookie is first-party:
+
+  ```json
+  { "rewrites": [ { "source": "/api/:path*", "destination": "https://<render-service>.onrender.com/api/:path*" } ] }
+  ```
+
+  The UI calls relative `/api/...` URLs. Do not call the Render domain from
+  the browser: third-party cookies are blocked by many browsers.
+- **Avoid long requests through the proxy.** Vercel proxied requests have a
+  time limit, so the UI should not use `POST /api/v1/alerts?wait=true`.
+  Submit the alert, then poll the case.
+- **Create accounts from a developer machine** against Atlas:
+
+  ```bash
+  SENTINEL_CASE_STORE=mongodb MONGODB_URI=... python scripts/manage_users.py create <username> --name "<Full Name>"
+  ```
 
 ## Graph on AuraDB
 

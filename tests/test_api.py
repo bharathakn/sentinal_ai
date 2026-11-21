@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 from src.agents.agent1.output_schema import Agent1Output, AgentStatus
 from src.agents.agent3.output_schema import Agent3Output, Agent3Status
 from src.api.app import create_app
+from src.api.auth import AuthService, JsonAuthStore
 from src.api.case_schema import (
     AlertInfo, AlertSource, AuditEvent, AuditEventType, CaseRecord, CaseStatus, CaseSummary, utcnow,
 )
@@ -76,10 +78,32 @@ def store(tmp_path):
     return JsonCaseStore(tmp_path / "cases")
 
 
-def client_for(store, india, factory=None, **kw):
+PASSWORD = "correct-horse-battery"
+
+
+def ensure_user(auth: AuthService, username: str, name: str = None) -> None:
+    if auth.store.get_user(username) is None:
+        auth.create_user(username, name or username.title(), PASSWORD)
+
+
+def login_as(c, auth: AuthService, username: str):
+    ensure_user(auth, username)
+    r = c.post("/api/v1/auth/login", json={"username": username, "password": PASSWORD})
+    assert r.status_code == 200, r.text
+    return r
+
+
+@contextmanager
+def client_for(store, india, factory=None, login="analyst.one", auth_store=None, **kw):
+    """App with a temporary auth store; signed in as ``login`` unless None."""
     app = create_app(store=store, investigator_factory=factory or make_factory(),
-                     feed_lookup=india.get_transaction, **kw)
-    return TestClient(app)
+                     feed_lookup=india.get_transaction, cookie_secure=False,
+                     auth_store=auth_store or JsonAuthStore(store._dir.parent / "auth.json"), **kw)
+    with TestClient(app) as c:
+        c.auth_service = app.state.auth
+        if login:
+            login_as(c, c.auth_service, login)
+        yield c
 
 
 def post_alert(c, wait=True, headers=None, **body):
@@ -168,11 +192,19 @@ class TestIngestion:
         assert r.status_code == 404
 
     def test_ingest_api_key(self, store, india, tx_ids):
-        with client_for(store, india, ingest_api_key="s3cret") as c:
+        with client_for(store, india, login=None, ingest_api_key="s3cret") as c:
             assert post_alert(c, transaction_id=tx_ids[2]).status_code == 401
             assert post_alert(c, transaction_id=tx_ids[2], headers={"X-API-Key": "wrong"}).status_code == 401
-            assert post_alert(c, transaction_id=tx_ids[2], headers={"X-API-Key": "s3cret"}).status_code == 200
-            assert c.get("/api/v1/cases").status_code == 200  # reads do not need the ingest key
+            ok = post_alert(c, transaction_id=tx_ids[2], headers={"X-API-Key": "s3cret"})
+            assert ok.status_code == 200
+            assert c.get("/api/v1/cases").status_code == 401  # the key does not grant case access
+            login_as(c, c.auth_service, "analyst.one")
+            case = c.get(f"/api/v1/cases/{ok.json()['case_id']}").json()
+        assert case["audit_trail"][0]["actor"] == "ingest-api-key"
+
+    def test_ingest_key_unset_rejects_any_key(self, store, india, tx_ids):
+        with client_for(store, india) as c:  # signed in, but a stray key is refused
+            assert post_alert(c, transaction_id=tx_ids[2], headers={"X-API-Key": "x"}).status_code == 401
 
     def test_queue_full(self, store, india, tx_ids, monkeypatch):
         monkeypatch.setenv("SENTINEL_MAX_PENDING_CASES", "0")
@@ -262,8 +294,7 @@ class TestCaseViews:
                                            ("CASE-E", None, None, 4)]:
             store.create(make_record(cid, CaseStatus.AWAITING_REVIEW if action else CaseStatus.RECEIVED,
                                      action, score, created=t0.replace(minute=minute)))
-        with TestClient(create_app(store=store, investigator_factory=make_factory(),
-                                   feed_lookup=india.get_transaction)) as c:
+        with client_for(store, india) as c:
             items = c.get("/api/v1/cases").json()["items"]
             assert [i["case_id"] for i in items][:4] == ["CASE-B", "CASE-D", "CASE-C", "CASE-A"]
             esc = c.get("/api/v1/cases?action=ESCALATE").json()
@@ -277,19 +308,20 @@ class TestCaseViews:
             body = post_alert(c, transaction_id=tx_ids[9]).json()
             cid, rec = body["case_id"], body["summary"]["recommended_action"]
             action = "CLEAR" if rec != "CLEAR" else "MONITOR"
-            r = c.post(f"/api/v1/cases/{cid}/decision", json={
-                "analyst_id": "analyst.one", "analyst_name": "Analyst One", "action": action,
-                "rationale": "Reviewed counterparties."})
+            r = c.post(f"/api/v1/cases/{cid}/decision", json={"action": action,
+                                                              "rationale": "Reviewed counterparties."})
             assert r.status_code == 200, r.text
             d = r.json()["analyst_decision"]
             assert r.json()["status"] == "DECIDED"
-            assert d["analyst_id"] == "analyst.one" and d["action"] == action
+            assert d["analyst_id"] == "analyst.one" and d["analyst_name"] == "Analyst.One"
+            assert d["action"] == action
             assert d["system_recommended_action"] == rec and d["report_validation_status"] == "VALIDATED"
             assert d["agrees_with_system"] is (False if rec in ("BLOCK", "MONITOR", "ESCALATE", "CLEAR") else None)
             assert d["report_run_id"] == c.get(f"/api/v1/cases/{cid}/report").json()["report"]["agent5_run_id"]
-            # revision: kept, linked, audited
+            # revision by another analyst: kept, linked, audited
+            login_as(c, c.auth_service, "analyst.two")
             r2 = c.post(f"/api/v1/cases/{cid}/decision", json={
-                "analyst_id": "analyst.two", "action": "ESCALATE", "rationale": "Second review."}).json()
+                "action": "ESCALATE", "rationale": "Second review."}).json()
             assert r2["analyst_decision"]["supersedes_decision_id"] == d["decision_id"]
             assert len(r2["decisions"]) == 2
             audit = c.get(f"/api/v1/cases/{cid}/audit").json()
@@ -299,12 +331,12 @@ class TestCaseViews:
 
     def test_decision_validation_and_state_rules(self, store, india):
         store.create(make_record("CASE-NEW", CaseStatus.RECEIVED))
-        with TestClient(create_app(store=store, investigator_factory=make_factory(),
-                                   feed_lookup=india.get_transaction)) as c:
-            ok = {"analyst_id": "a1", "action": "CLEAR", "rationale": "x"}
+        with client_for(store, india) as c:
+            ok = {"action": "CLEAR", "rationale": "x"}
             assert c.post("/api/v1/cases/NOPE/decision", json=ok).status_code == 404
-            for bad in ({**ok, "action": "HUMAN_REVIEW"}, {**ok, "rationale": ""}, {**ok, "analyst_id": "a b"},
-                        {"action": "CLEAR", "rationale": "x"}):
+            # identity can never come from the body
+            for bad in ({**ok, "action": "HUMAN_REVIEW"}, {**ok, "rationale": ""}, {**ok, "analyst_id": "someone"},
+                        {"rationale": "x"}):
                 assert c.post("/api/v1/cases/CASE-NEW/decision", json=bad).status_code == 422
         # The RECEIVED case was re-queued by start(); its stub transaction cannot be
         # investigated, so it never reaches a decidable status.
@@ -313,7 +345,7 @@ class TestCaseViews:
 
         assert store.get("CASE-NEW").status != CaseStatus.AWAITING_REVIEW
         with pytest.raises(Conflict):
-            CaseService(store).decide("CASE-NEW", DecisionRequest(**ok))
+            CaseService(store).decide("CASE-NEW", DecisionRequest(**ok), analyst_id="analyst.one")
 
     def test_cors_allow_list(self, store, india, monkeypatch):
         monkeypatch.setenv("SENTINEL_CORS_ORIGINS", "https://sentinel.example.app")

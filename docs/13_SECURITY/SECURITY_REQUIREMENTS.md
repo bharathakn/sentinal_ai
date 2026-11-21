@@ -22,6 +22,12 @@ Evidence should remain associated with its source and timestamp.
 
 Analyst actions must be recorded.
 
+## Authentication (implemented Phase 13.1)
+
+Analysts sign in with administrator-created accounts. The API takes the
+analyst's identity from the server-side session, never from the request
+body. Details: `docs/09_BACKEND/API_DESIGN.md` → Authentication.
+
 ## AI Safety
 
 The LLM must not be treated as an authoritative evidence source.

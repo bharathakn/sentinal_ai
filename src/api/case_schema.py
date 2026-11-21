@@ -90,10 +90,10 @@ class AlertRequest(BaseModel):
 
 
 class DecisionRequest(BaseModel):
+    """The analyst is the signed-in user; identity is never taken from the body."""
+
     model_config = ConfigDict(extra="forbid")
 
-    analyst_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.@\-]+$")
-    analyst_name: Optional[str] = Field(default=None, max_length=128)
     action: AnalystAction
     rationale: str = Field(min_length=1, max_length=4000)
 

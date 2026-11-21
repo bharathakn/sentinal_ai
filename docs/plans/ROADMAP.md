@@ -167,8 +167,11 @@ deterministically and remain an analyst-review item.
   restart. Peak memory 445 MB (Render 512 MB).
 - CORS allow-list from env; `/health`; optional ingest API key.
 - Spec: `docs/09_BACKEND/API_DESIGN.md`.
-- Open (project owner): analyst authentication. Identity is self-declared in
-  the prototype.
+- Phase 13.1 (2026-11-22, requested by the project owner): analyst sign-in.
+  Administrator-created accounts, scrypt passwords, server-side sessions in
+  an HttpOnly cookie (7 days idle / 30 days max), lockout, revocation. The
+  decision identity comes from the session. Phase 14 must call the API
+  through a Vercel rewrite so the cookie is first-party.
 
 ## Phase 14 — Analyst Dashboard & Demonstration (NEXT)
 

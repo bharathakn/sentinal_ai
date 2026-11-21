@@ -108,11 +108,18 @@ Browser UI: http://localhost:7474
 ## Run the API (Phase 13)
 
 ```bash
-.venv/bin/uvicorn src.api.main:app --port 8000 --workers 1     # OpenAPI docs: http://localhost:8000/docs
-curl -X POST 'localhost:8000/api/v1/alerts?wait=true' -H 'Content-Type: application/json' \
+.venv/bin/python scripts/manage_users.py create analyst.demo --name "Demo Analyst"   # once; prompts for a password
+SENTINEL_COOKIE_SECURE=false .venv/bin/uvicorn src.api.main:app --port 8000 --workers 1   # docs: /docs
+curl -c jar -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
+     -d '{"username": "analyst.demo", "password": "<password>"}'
+curl -b jar -X POST 'localhost:8000/api/v1/alerts?wait=true' -H 'Content-Type: application/json' \
      -d '{"transaction_id": "TXN_IND_202608_000977"}'
-curl localhost:8000/api/v1/cases
+curl -b jar localhost:8000/api/v1/cases
 ```
+
+All case endpoints need sign-in. `SENTINEL_COOKIE_SECURE=false` is only
+needed for non-browser clients such as curl over plain http; browsers accept
+Secure cookies from `http://localhost`.
 
 The API loads `.env` and defaults to the India synthetic evidence backend.
 Cases go to `var/cases/` (`SENTINEL_CASE_STORE=json`), or to MongoDB Atlas
@@ -125,7 +132,7 @@ with `SENTINEL_CASE_STORE=mongodb`. Endpoints and lifecycle:
 .venv/bin/python -m pytest tests/ -q
 ```
 
-About 1,050 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`;
+About 1,080 tests. `tests/conftest.py` loads only the `NEO4J_*` keys from `.env`;
 the 29 live Neo4j integration tests skip when those are not set. The case-store
 tests in `tests/test_api.py` also run against MongoDB when `MONGODB_URI` is
 set (only `MONGODB_*` keys are read), in a temporary database that is dropped. The suite

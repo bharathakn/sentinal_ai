@@ -53,7 +53,11 @@ uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1   # OpenAPI doc
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Liveness, case-store reachability, investigator readiness, queue length |
+| GET | `/health` | Liveness, case-store reachability, investigator readiness, queue length (public) |
+| POST | `/api/v1/auth/login` | Sign in: `username`, `password`, `remember` (default true); sets the session cookie |
+| POST | `/api/v1/auth/logout` | Sign out (session deleted server-side) |
+| GET | `/api/v1/auth/me` | Signed-in analyst |
+| POST | `/api/v1/auth/password` | Change own password (`current_password`, `new_password`) |
 | POST | `/api/v1/alerts` | Ingest an alert; creates a case and queues its investigation. `202`; `?wait=true` blocks until done (`200`) |
 | GET | `/api/v1/cases` | Case queue, in priority order. Filters `status`, `action`; paging `limit` (≤ 200), `offset` |
 | GET | `/api/v1/cases/{id}` | Full case: transaction, all agent outputs, report, validation, pipeline trace, decisions, audit trail |
@@ -80,10 +84,11 @@ Optional: `alert_id` (defaults to the transaction's `metadata.alert_id`) and
   `duplicate: true`). A failed case does not block a new one.
 - **Queue limit.** More than `SENTINEL_MAX_PENDING_CASES` (default 50)
   queued investigations → `429` with `Retry-After`.
-- **Ingest key.** When `SENTINEL_INGEST_API_KEY` is set, ingestion requires
-  the `X-API-Key` header. This protects the endpoint that triggers LLM calls
-  and database writes. It is meant for a server-side alert source; a key
-  embedded in the browser UI would be public.
+- **Who may ingest.** A signed-in analyst, or a server-side alert source
+  sending `X-API-Key` equal to `SENTINEL_INGEST_API_KEY`. The key grants
+  ingestion only, not case access. When the variable is unset, any
+  `X-API-Key` is refused. The `CASE_CREATED` audit event names the
+  submitter: the username, or `ingest-api-key`.
 
 ### Case lifecycle
 
@@ -119,12 +124,10 @@ derived:
 
 ### Analyst decision
 
-Request:
-- `analyst_id` (letters, digits, `. _ @ -`);
-- optional `analyst_name`;
-- `action`: one of BLOCK / MONITOR / ESCALATE / CLEAR, the actions in the
-  project plan;
-- `rationale` (required).
+Request: `action` (BLOCK / MONITOR / ESCALATE / CLEAR, the actions in the
+project plan) and `rationale` (required). The analyst is the signed-in user:
+the decision records their username and display name. A body that tries to
+supply an identity is rejected (`422`).
 
 Allowed only once the investigation is complete (`AWAITING_REVIEW` or
 `DECIDED`); otherwise `409`.
@@ -166,11 +169,11 @@ MongoDB ones in a temporary database that is dropped afterwards.
 
 | Code | Meaning |
 |---|---|
-| `401` | Missing or invalid ingest key |
+| `401` | Not signed in, session expired, account disabled, wrong credentials, or invalid ingest key |
 | `404` | Unknown case, unknown feed transaction, or no report |
 | `409` | Invalid state for a decision, or a concurrent change |
 | `422` | Request validation (Pydantic) |
-| `429` | Queue full |
+| `429` | Queue full, or sign-in locked after repeated failures (`Retry-After`) |
 | `503` | Case store unreachable, or synthetic feed not configured |
 
 Exception messages are never returned or stored.
@@ -182,12 +185,32 @@ Exception messages are never returned or stored.
 Methods are GET and POST, headers `Content-Type` and `X-API-Key`, with no
 credentials.
 
+### Authentication (Phase 13.1, `src/api/auth.py`)
+
+Goal: real sign-in that analysts rarely have to repeat.
+
+| Aspect | Behaviour |
+|---|---|
+| Accounts | Created by an administrator with `scripts/manage_users.py` (`create`, `reset-password`, `disable`, `enable`, `list`); no public sign-up. Usernames are lower-case and case-insensitive at sign-in. |
+| Passwords | scrypt (n=2^14, r=8, p=1, random salt); at least 10 characters. Never accepted on the command line. |
+| Session | Random 256-bit token in an `HttpOnly`, `SameSite=Lax`, `Secure` cookie (`sentinel_session`). The store keeps only its SHA-256. |
+| How long | "Keep me signed in" (default): expires after 7 days without use (`SENTINEL_SESSION_IDLE_DAYS`) and at most 30 days after sign-in (`SENTINEL_SESSION_MAX_DAYS`). Without it: 12 hours, and the cookie ends with the browser session. |
+| Sign-out / revocation | Sign-out deletes the session. Disabling a user, a password reset, or a password change signs the user out of all other devices. |
+| Brute force | 5 failed sign-ins for a username within 15 minutes lock it for the rest of the window (`429`). Unknown usernames and wrong passwords get the same error and similar timing. |
+| Storage | Same backend as cases: `var/auth.json` (json, file mode 600), or the MongoDB collections `users` and `sessions` (a TTL index removes expired sessions). |
+
+**The browser must see the API as first-party.** Browsers increasingly block
+third-party cookies, so the Vercel UI must call the API through a Vercel
+rewrite (`/api/*` → Render) rather than calling the Render domain directly.
+`SameSite=Lax` also stops other sites from making state-changing requests
+with the cookie.
+
 ### Prototype limitations
 
-- **Self-declared analyst identity.** The analyst id is supplied by the
-  caller; there is no login. Decisions record who claimed to decide, not an
-  authenticated user. A real deployment needs SSO or OIDC in front of the
-  decision endpoint. Open decision for the project owner.
+- **No roles and no SSO.** Every account is an analyst. Accounts are
+  managed with the script.
+- **Lockout is per process.** The failure counter lives in memory, so a
+  restart clears it.
 - **Synthetic data only.** Every case and `/health` response carries
   `prototype_notice`: synthetic or public-dataset data, mock evidence
   providers, not banking infrastructure.
