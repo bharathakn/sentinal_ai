@@ -121,7 +121,8 @@ class TestEvidenceBundle:
 
     def test_agent_facts_carry_provenance(self, state):
         b = build_evidence_bundle(state)
-        kyc_fact = next(f for f in b.facts if f.label == "Sender KYC status")
+        kyc_fact = next(f for f in b.facts if f.label.startswith("Sender KYC status"))
+        assert kyc_fact.label == "Sender KYC status (ACC_S)"  # entity named in the label
         assert kyc_fact.source_mode == "MOCK" and kyc_fact.observed_at and kyc_fact.reference_id
         net = next(f for f in b.facts if f.label.startswith("MULE_LIKE finding"))
         assert net.reference_id == state["agent3_output"].findings[0].finding_id

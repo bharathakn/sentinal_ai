@@ -28,3 +28,11 @@ or
 A failed report must be flagged.
 
 The analyst must be informed that manual verification is required.
+
+## Implementation
+
+Implemented in Phase 11 (`src/agents/validator/`). Seven deterministic checks
+cover the items above, plus wording and label leakage. If an LLM-written
+report fails, a template report built from the same evidence is validated and
+presented instead. The failed LLM report is kept for audit. See
+`docs/02_AGENTS/OUTPUT_VALIDATOR.md`.

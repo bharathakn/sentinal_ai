@@ -59,5 +59,6 @@ runs Agents 1–5 sequentially with the same state contract
 |---|---|
 | `case_id`, `case_created_at_utc`, `transaction` | `new_case_state` |
 | `agent1_output` … `agent4_output` | Agents 1–4 |
-| `agent5_output` | Agent 5: draft report, evidence bundle, decision copy (`NOT_VALIDATED`) |
-| validation result | Output Validator (Phase 11) |
+| `agent5_output` | Agent 5, then `validation_status` set by the Output Validator; may be replaced by a validated template report |
+| `validation_output` | Output Validator result for the presented report |
+| `rejected_reports` | Reports that failed validation and were not presented, with their validation (audit) |

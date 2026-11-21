@@ -3,7 +3,8 @@
 ## Status
 
 IMPLEMENTED (Phase 10). Code: `src/agents/agent5/`. Reports remain
-`NOT_VALIDATED` until the Output Validator (Phase 11) checks them.
+`NOT_VALIDATED` until the Output Validator (`docs/02_AGENTS/OUTPUT_VALIDATOR.md`)
+checks them.
 
 ## Purpose
 
@@ -24,7 +25,9 @@ case state (transaction + Agent 1–4 outputs)
   → build_evidence_bundle()       deterministic, numbered, sourced facts (F-001 …)
   → narrative sections            LLM (Groq) or template writer
   → SYSTEM sections               deterministic, from Agent 4 / audit facts
-  → Agent5Output                  sections + decision copy + bundle, NOT_VALIDATED
+  → citation completion           identifiers named but not cited (LLM only)
+  → Agent5Output                  sections + decision copy + bundle
+  → Output Validator              VALIDATED / NEEDS_HUMAN_REVIEW (template fallback)
 ```
 
 ### 1. Evidence bundle (`facts.py`)
@@ -64,7 +67,11 @@ These sections are written by the LLM, or by the template writer as fallback:
 **LLM (`prompt.py`, `llm_client.py`)**
 - Groq `openai/gpt-oss-120b` (`GROQ_MODEL`).
 - The prompt contains only facts from these five sections, compacted as
-  `[id, label, value]`. Regulatory and audit facts are not sent.
+  `[id, label, value]`. Regulatory and audit facts are not sent, and at most
+  3 supporting transfers per network finding are sent (all remain in the
+  bundle). Evidence fact labels name their entity, e.g. `(ACC_… / DEV_…)`.
+- The completion allowance adapts so prompt + completion fit
+  `GROQ_TPM_LIMIT` (default 8,000).
 - Strict structured outputs: the response is constrained to a JSON schema
   `{"sections": {SECTION: [{"text", "fact_ids"}]}}`.
 - Prompt rules:
@@ -137,7 +144,11 @@ Nothing in the narrative can change it.
   `prompt_version`, `template_version`.
 - **Content:** `sections` (seven, in order), `decision`, `evidence_bundle`,
   `warnings`, `errors`.
-- **`validation_status`:** `NOT_VALIDATED`. Set only by the Output Validator.
+- **`validation_status`:** `NOT_VALIDATED` until the Output Validator sets
+  `VALIDATED` or `NEEDS_HUMAN_REVIEW`.
+
+Each `Statement` may also carry `added_fact_ids`: citations added by code
+(identifier citation completion, see OUTPUT_VALIDATOR.md).
 
 Each `Statement` carries `text`, `fact_ids` (at least one) and `origin`
 (LLM / TEMPLATE / SYSTEM).
@@ -172,7 +183,7 @@ within a minute may fall back to the template writer.
 - The LLM sometimes uses wording that is technically true but easy to
   misread. Example: "no SAR/STR filing is made automatically" for a case
   where a SAR/STR *is* recommended.
-- Phase 11 can catch the first kind mechanically: every number, date and
+- The Output Validator (Phase 11) catches the first kind mechanically: every number, date and
   identifier must appear in the facts the statement cites. The second kind
   cannot be detected deterministically, which is one reason the report is
   always reviewed by a human.

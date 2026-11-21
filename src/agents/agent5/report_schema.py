@@ -117,6 +117,10 @@ class Statement(BaseModel):
     text: str
     fact_ids: list[str] = Field(min_length=1)
     origin: StatementOrigin
+    added_fact_ids: list[str] = Field(
+        default_factory=list,
+        description="Citations added by code (identifier citation completion), a subset of fact_ids.",
+    )
 
 
 class Section(BaseModel):

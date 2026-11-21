@@ -7,8 +7,11 @@ to the agents; they are joined afterwards for evaluation only) and reports:
   * per-scenario mean risk score and action distribution
   * how often each signal / network pattern fired per label
 
+  * with --reports: Agent 5 report generation + Output Validator pass rate
+
 Usage:
     PYTHONPATH=. python scripts/evaluate_pipeline.py [--per-scenario 25] [--normal 300] [--out FILE]
+        [--reports none|template|llm] [--llm-interval 45]
 """
 
 from __future__ import annotations
@@ -34,6 +37,10 @@ def main() -> None:
     ap.add_argument("--normal", type=int, default=300)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default=None, help="Write full results JSON here")
+    ap.add_argument("--reports", choices=["none", "template", "llm"], default="none",
+                    help="Also generate and validate reports (llm: rate-limited, see --llm-interval)")
+    ap.add_argument("--llm-interval", type=float, default=60.0,
+                    help="Seconds between cases with --reports llm (Groq free tier ~8k tokens/min)")
     a = ap.parse_args()
 
     logging.basicConfig(level=logging.ERROR)
@@ -61,10 +68,18 @@ def main() -> None:
 
     rows = []
     t0 = time.time()
-    with Investigator(generate_report=False) as inv:
-        for rec in sample.to_dict("records"):
+    agent5 = None
+    if a.reports == "template":
+        from src.agents.agent5 import ExplanationGeneratorAgent
+        agent5 = ExplanationGeneratorAgent(llm_client=None)
+    with Investigator(generate_report=a.reports != "none", agent5=agent5) as inv:
+        for n, rec in enumerate(sample.to_dict("records")):
+            if a.reports == "llm" and n:
+                time.sleep(a.llm_interval)
             tx = IndiaSyntheticAdapter.from_row({k: rec[k] for k in feats.columns})
             st = inv.investigate(tx)
+            v, r5 = st.get("validation_output"), st.get("agent5_output")
+            rejected = st.get("rejected_reports") or []
             o = st["agent4_output"]
             rows.append({
                 "transaction_id": rec["transaction_id"],
@@ -77,6 +92,11 @@ def main() -> None:
                 "signals": {b.signal.value: b.value for b in o.score_breakdown},
                 "patterns": sorted({f.pattern_type.value for f in st["agent3_output"].findings}),
                 "agent_status": [st[k].status.value for k in ("agent1_output", "agent2_output", "agent3_output")],
+                "validation": None if v is None else v.status.value,
+                "presented_generator": None if r5 is None or r5.generator is None else r5.generator.value,
+                "failed_checks": [] if v is None else [c.value for c in v.failed_checks()],
+                "rejected_llm_failed_checks": [c.value for rr in rejected for c in rr.validation.failed_checks()],
+                "llm_fallback_reason": None if r5 is None else r5.fallback_reason,
             })
     elapsed = time.time() - t0
     df = pd.DataFrame(rows)
@@ -113,6 +133,18 @@ def main() -> None:
 
     statuses = collections.Counter(s for ss in df["agent_status"] for s in ss)
     print("\nUpstream agent statuses:", dict(statuses))
+
+    if a.reports != "none":
+        print("\nReport validation")
+        print("  presented reports:", dict(collections.Counter(df["validation"])))
+        print("  presented generator:", dict(collections.Counter(df["presented_generator"])))
+        print("  failed checks (presented):", dict(collections.Counter(c for cs in df["failed_checks"] for c in cs)))
+        rej = df["rejected_llm_failed_checks"].apply(bool)
+        print(f"  LLM reports rejected by the validator: {int(rej.sum())}",
+              dict(collections.Counter(c for cs in df["rejected_llm_failed_checks"] for c in cs)))
+        fb = df["llm_fallback_reason"].dropna()
+        if len(fb):
+            print("  template fallback reasons:", dict(collections.Counter(r.split(" (")[0] for r in fb)))
 
     if a.out:
         Path(a.out).write_text(json.dumps({

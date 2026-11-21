@@ -8,7 +8,8 @@ Runs the implemented agents in the documented order on one transaction:
       → Agent 2 Evidence Gatherer
       → Agent 3 Network Analyser
       → Agent 4 Risk Assessor
-      → Agent 5 Explanation Generator (draft report; optional)
+      → Agent 5 Explanation Generator (report; optional)
+      → Output Validator (VALIDATED / NEEDS_HUMAN_REVIEW; template fallback)
 
 This is a plain sequential runner so the pipeline can be exercised before
 LangGraph orchestration (Phase 12). Each agent call follows the same
@@ -41,6 +42,7 @@ class Investigator:
         neo4j_manager: Any = None,
         agent5: Any = None,
         generate_report: bool = True,
+        validation_stage: Any = None,
     ) -> None:
         from .agent1 import AnomalyDetectorAgent
         from .agent3 import NetworkAnalyserAgent
@@ -54,9 +56,12 @@ class Investigator:
         self.agent3 = agent3 or NetworkAnalyserAgent(connection_manager=neo4j_manager)
         self.agent4 = agent4 or RiskAssessorAgent()
         self.agent5 = None
+        self.validation = None
         if generate_report:
             from .agent5 import ExplanationGeneratorAgent
+            from .validator import ValidationStage
             self.agent5 = agent5 or ExplanationGeneratorAgent()
+            self.validation = validation_stage or ValidationStage()
 
     @staticmethod
     def _try_connect():
@@ -86,6 +91,7 @@ class Investigator:
         state = self.agent4(state)
         if self.agent5 is not None:
             state = self.agent5(state)
+            state = self.validation(state)
         return state
 
     def close(self) -> None:

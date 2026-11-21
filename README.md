@@ -92,9 +92,10 @@ A deterministic validation layer must check the generated report before it reach
 
 ## Current Status
 
-Phases 1–10 are complete: canonical schema, ML models, Agents 1–5 (anomaly
+Phases 1–11 are complete: canonical schema, ML models, Agents 1–5 (anomaly
 detection, evidence gathering, network analysis, risk assessment, grounded
-report generation). Next is Phase 11, the Output Validator. The authoritative
+report generation) and the deterministic Output Validator. Next is Phase 12,
+LangGraph orchestration. The authoritative
 status, plan and open decisions live in `docs/plans/CURRENT.md` and
 `docs/plans/ROADMAP.md`.
 

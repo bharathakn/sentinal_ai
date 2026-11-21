@@ -5,7 +5,9 @@ from __future__ import annotations
 from .report_schema import Agent5Output, StatementOrigin
 
 
-def render_markdown(report: Agent5Output, include_facts: bool = True) -> str:
+def render_markdown(report: Agent5Output, include_facts: bool = True, validation=None) -> str:
+    """Render a report. ``validation`` (a validator ValidationOutput) adds the
+    per-check validation results."""
     d = report.decision
     lines = [
         f"# Investigation Report — {report.case_id or 'Not identified'}",
@@ -23,6 +25,18 @@ def render_markdown(report: Agent5Output, include_facts: bool = True) -> str:
     ]
     if report.warnings:
         lines += ["**Warnings:**"] + [f"- {w}" for w in report.warnings] + [""]
+    if validation is not None:
+        lines += [f"**Validation:** {validation.status.value} · {validation.checks_passed}/"
+                  f"{validation.checks_total} checks passed (validator {validation.validator_version})", "",
+                  "| Check | Result | Items | Issues |", "|---|---|---|---|"]
+        for c in validation.checks:
+            lines.append(f"| {c.check.value} | {'pass' if c.passed else '**FAIL**'} | {c.items_checked} | {len(c.issues)} |")
+        lines.append("")
+        for c in validation.checks:
+            for i in c.issues:
+                where = f"{i.section}[{i.statement_index}] " if i.section and i.statement_index is not None else ""
+                lines.append(f"- {c.check.value}: {where}{i.reason}")
+        lines.append("")
     for sec in report.sections:
         lines += [f"## {sec.title}", ""]
         if not sec.statements:

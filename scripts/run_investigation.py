@@ -90,7 +90,13 @@ def main() -> None:
               f"validation={a5.validation_status}")
         if a5.fallback_reason:
             print(f"  LLM not used: {a5.fallback_reason}")
-        md = render_markdown(a5)
+        v = state.get("validation_output")
+        if v is not None:
+            print(f"Validator {v.status.value:21} checks {v.checks_passed}/{v.checks_total}"
+                  + (f" failed={[c.value for c in v.failed_checks()]}" if v.failed_checks() else ""))
+        for rr in state.get("rejected_reports") or []:
+            print(f"  rejected report kept for audit: {rr.reason}")
+        md = render_markdown(a5, validation=state.get("validation_output"))
         if a.report_out:
             Path(a.report_out).write_text(md)
             print(f"  report written to {a.report_out}")

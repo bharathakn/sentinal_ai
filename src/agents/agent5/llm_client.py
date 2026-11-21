@@ -13,6 +13,8 @@ Configuration (environment):
     GROQ_MAX_COMPLETION_TOKENS  default 2500
     GROQ_MAX_RATE_LIMIT_WAIT    default 10 (seconds; one retry on HTTP 429
                                 when Groq asks to wait at most this long)
+    GROQ_TPM_LIMIT              default 8000; the completion allowance is
+                                reduced so prompt + completion fit it
     GROQ_STRICT_SCHEMA          default true; for openai/gpt-oss models the
                                 response is constrained to the JSON schema
                                 (strict structured outputs). Other models use
@@ -62,6 +64,7 @@ class GroqClient:
         self._timeout = timeout or float(os.environ.get("GROQ_TIMEOUT_SECONDS", "45"))
         self._max_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "2500"))
         self._max_wait = float(os.environ.get("GROQ_MAX_RATE_LIMIT_WAIT", "10"))
+        self._tpm_limit = int(os.environ.get("GROQ_TPM_LIMIT", "8000"))
         self._strict = os.environ.get("GROQ_STRICT_SCHEMA", "true").strip().lower() not in ("0", "false", "no")
         self._seed = seed
 
@@ -79,7 +82,7 @@ class GroqClient:
                 else {"type": "json_object"}),
             "temperature": 0.2,
             "seed": self._seed,
-            "max_completion_tokens": self._max_tokens,
+            "max_completion_tokens": self.completion_budget(system, user),
         }
         if self.model.startswith("openai/gpt-oss"):
             body["reasoning_effort"] = "low"
@@ -107,6 +110,15 @@ class GroqClient:
         if not content or not content.strip():
             raise LLMUnavailable("LLM returned empty content")
         return content
+
+    def completion_budget(self, system: str, user: str) -> int:
+        """Completion tokens that keep prompt + completion within the TPM limit.
+
+        Prompt tokens are estimated conservatively at 3 characters per token.
+        Never below 1200 (a report needs room); never above the configured max.
+        """
+        est_prompt = (len(system) + len(user)) // 3 + 200
+        return max(1200, min(self._max_tokens, self._tpm_limit - est_prompt))
 
     def _post(self, httpx, body):  # noqa: ANN001
         try:

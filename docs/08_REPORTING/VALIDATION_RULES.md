@@ -41,3 +41,17 @@ One or more required checks fail:
 ## Principle
 
 Validation is deterministic and separate from LLM generation.
+
+## Implementation (Phase 11)
+
+| Rule | Check(s) in `src/agents/validator/` |
+|---|---|
+| Amount accuracy | CITATION_GROUNDING (numbers), BUNDLE_INTEGRITY (facts equal a rebuild from the case state) |
+| Date accuracy | CITATION_GROUNDING (dates, times) |
+| Entity validation | CITATION_GROUNDING (identifiers) |
+| Regulatory validation | REGULATORY |
+| Action validation | DECISION_CONSISTENCY |
+| Source tag validation | STRUCTURE (every statement cites facts), BUNDLE_INTEGRITY (every fact sourced; audit trail complete) |
+| Added in Phase 11 | LANGUAGE (no conclusive wording), LABEL_LEAKAGE (no ground truth) |
+
+Details: `docs/02_AGENTS/OUTPUT_VALIDATOR.md`.

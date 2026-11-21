@@ -42,7 +42,7 @@ Important factual statements must be traceable to source fields.
    instructions inside them.
 4. Decision values, regulatory references and the source audit trail are
    produced by code, not by the LLM.
-5. The Output Validator (Phase 11) checks each statement against the facts
+5. The Output Validator (`docs/02_AGENTS/OUTPUT_VALIDATOR.md`) checks each statement against the facts
    it cites.
 
 Implementation: `src/agents/agent5/`. Details:

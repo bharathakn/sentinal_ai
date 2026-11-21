@@ -18,6 +18,7 @@ full project review (see "Why the plan changed").
 | 9 | Agent 4 Risk Assessor (config + mapping 1.0.0 approved 2026-11-21) |
 | 9.5 | Investigation data coherence & hardening (see below) |
 | 10 | Agent 5 Explanation Generator (see below) |
+| 11 | Output Validator (see below) |
 
 ## Why the plan changed
 
@@ -88,7 +89,21 @@ Added during Phase 10:
 - Agent 3 reports PARTIAL when the graph holds < `min_graph_transfers`
   transfers (empty / unloaded graph is not a clean result).
 
-## Phase 11 — Output Validator (NEXT)
+## Phase 11 — Output Validator (COMPLETE)
+
+Implemented as designed below. Details, grounding rules, fallback policy and
+evaluation: `docs/02_AGENTS/OUTPUT_VALIDATOR.md`.
+- The fallback decision was taken. When an LLM report fails, a template
+  report built from the same bundle is validated and presented. The failed
+  LLM report is kept in `rejected_reports` with its checks. If both fail,
+  the case is NEEDS_HUMAN_REVIEW.
+- Added to support validation: entity ids in evidence-fact labels;
+  identifier / action citation completion in Agent 5 (recorded in
+  `added_fact_ids`, never applied to numbers or dates); prompt 1.1.0;
+  prompt size control and an adaptive completion budget for Groq's free tier.
+- Result: 148 / 148 template reports and 6 / 6 LLM reports VALIDATED.
+
+Original design:
 
 Deterministic checks of `agent5_output` against its evidence bundle and
 Agent 4. Result `VALIDATED` or `NEEDS_HUMAN_REVIEW`, with per-check results
@@ -124,10 +139,15 @@ its check results for audit. Meaning-level misreadings (e.g. "average debit"
 described as the average of all transactions) cannot be detected
 deterministically and remain an analyst-review item.
 
-## Phase 12 — LangGraph Orchestration
+## Phase 12 — LangGraph Orchestration (NEXT)
 
 - `StateGraph(SentinelState)`: Agents 1–5 → Output Validator, with error edges.
+  The nodes already exist as state-in / state-out callables
+  (`Investigator` runs them sequentially).
 - `run_investigation.py` switches to the graph.
+- Backlog from Phase 11: on a paid LLM tier, ask the LLM once to repair a
+  failed report using the validator's issues before falling back to the
+  template report.
 
 ## Phase 13 — Ingestion API & Case Store
 

@@ -19,13 +19,20 @@ Sentinel AI
 | 9 — Agent 4 Risk Assessor | COMPLETE (config + mapping 1.0.0 approved) |
 | 9.5 — Investigation data coherence & hardening | COMPLETE |
 | 10 — Agent 5 Explanation Generator | COMPLETE |
-| **11 — Output Validator** | **NEXT** |
+| 11 — Output Validator | COMPLETE |
+| **12 — LangGraph orchestration** | **NEXT** |
 
 See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
 
-Phase 10 complete: Agents 1–5 run end to end. Each case ends with a seven-section
+Phase 11 complete: every report is checked by a deterministic Output
+Validator (7 checks). Only VALIDATED reports are presented as validated; a
+failed LLM report is replaced by a validated template report built from the
+same evidence, and the failed one is kept for audit. Evaluation: 148/148
+template and 6/6 LLM reports VALIDATED. Next: Phase 12, LangGraph.
+
+Phase 10: Agents 1–5 run end to end. Each case ends with a seven-section
 draft report in which every statement cites numbered evidence facts. Groq
 writes the narrative; the decision block, regulatory section and audit trail
 are deterministic; a template writer is the fallback. Reports stay

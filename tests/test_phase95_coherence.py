@@ -376,5 +376,7 @@ class TestCaseStateAndFirewall:
         # Agent 5 runs last and writes a draft report (template in tests)
         r = state["agent5_output"]
         assert r.case_id == "CASE-T" and r.generator.value == "TEMPLATE"
-        assert r.validation_status == "NOT_VALIDATED"
+        v = state["validation_output"]  # Output Validator runs after Agent 5
+        assert r.validation_status == v.status.value
+        assert v.report_run_id == r.agent5_run_id
         assert Investigator(agent1=FakeA1(), agent3=FakeA3(), generate_report=False).agent5 is None

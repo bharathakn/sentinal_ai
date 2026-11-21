@@ -27,7 +27,7 @@ Rules
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from typing_extensions import TypedDict
@@ -53,8 +53,11 @@ class SentinelState(TypedDict, total=False):
     agent2_output : Output from Agent 2 (Evidence Gatherer). Set after Agent 2.
     agent3_output : Output from Agent 3 (Network Analyser). Set after Agent 3.
     agent4_output : Output from Agent 4 (Risk Assessor). Set after Agent 4.
-    agent5_output : Output from Agent 5 (Explanation Generator): draft report
-                    with its evidence bundle. NOT_VALIDATED until Phase 11.
+    agent5_output : Output from Agent 5 (Explanation Generator): report with
+                    its evidence bundle; validation_status set by the validator.
+    validation_output : Output Validator result for the presented report.
+    rejected_reports  : Reports generated but not presented (failed
+                        validation), kept with their validation for audit.
     """
 
     case_id: str
@@ -65,6 +68,8 @@ class SentinelState(TypedDict, total=False):
     agent3_output: Optional[Agent3Output]
     agent4_output: Optional[Agent4Output]
     agent5_output: Optional[Agent5Output]
+    validation_output: Optional[Any]   # validator.ValidationOutput (typed loosely: import order)
+    rejected_reports: list[Any]
 
 
 # ---------------------------------------------------------------------------

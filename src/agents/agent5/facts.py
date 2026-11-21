@@ -26,7 +26,7 @@ from typing import Any, Iterable, Optional
 
 from .report_schema import NOT_IDENTIFIED, EvidenceBundle, Fact, ReportSection, SourceAgent
 
-BUILDER_VERSION = "1.0.0"
+BUILDER_VERSION = "1.1.0"
 MAX_SHAP_FEATURES = 5
 MAX_TRANSFERS_PER_FINDING = 6
 MAX_NEWS_ARTICLES = 3
@@ -283,6 +283,11 @@ def _anomaly_facts(fb: _Facts, a1: Any, tx: Any) -> None:
 # ---------------------------------------------------------------------------
 
 def _ev(fb: _Facts, resp: Any, field: str, label: str, value: str) -> str:
+    # Name the entity the evidence is about (account, device, beneficiary), so
+    # a statement naming it can cite this fact.
+    entity = getattr(resp, "requested_entity_id", None)
+    if entity:
+        label = f"{label} ({str(entity).replace(':', ' / ')})"
     return fb.add(S.EVIDENCE_SUMMARY, label, value, SourceAgent.AGENT_2,
                   getattr(resp, "source", field.upper()), f"agent2_output.{field}",
                   source_mode=_enum(getattr(resp, "source_mode", None)),
@@ -455,7 +460,8 @@ def _network_facts(fb: _Facts, a3: Any) -> None:
         if f.total_amount is not None:
             details.append(f"total {fmt_amount(f.total_amount, f.currency)}")
         if f.elapsed_minutes is not None:
-            details.append(f"over {f.elapsed_minutes:,.1f} minutes")
+            m = f.elapsed_minutes
+            details.append(f"over {round(m):,} minutes" if m >= 10 else f"over {m:.1f} minutes")
         if f.heuristic_score is not None:
             details.append(f"heuristic score {f.heuristic_score:.3f}")
         add(f"{label}: details", "; ".join(details), p, f.finding_id, f.rule_id)

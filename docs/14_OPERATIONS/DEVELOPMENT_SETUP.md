@@ -91,8 +91,11 @@ PYTHONPATH=. .venv/bin/python scripts/load_india_sample_graph.py --reset-india
 # One transaction through Agents 1–5 and print the draft report
 # (--template: no LLM call; --no-report: stop after Agent 4; --report-out FILE.md)
 PYTHONPATH=. .venv/bin/python scripts/run_investigation.py TXN_IND_202608_000977
-# End-to-end evaluation on a labelled sample (~30 s)
+# End-to-end evaluation on a labelled sample (~30 s locally)
 PYTHONPATH=. .venv/bin/python scripts/evaluate_pipeline.py
+# ... plus report generation + Output Validator pass rate
+PYTHONPATH=. .venv/bin/python scripts/evaluate_pipeline.py --reports template
+PYTHONPATH=. .venv/bin/python scripts/evaluate_pipeline.py --per-scenario 1 --normal 2 --reports llm
 ```
 
 These scripts use `SENTINEL_EVIDENCE_BACKEND=india_synthetic` by default.

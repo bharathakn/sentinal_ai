@@ -26,9 +26,11 @@ import logging
 from typing import Any, Optional, Union
 
 from .facts import build_evidence_bundle
+from .grounding import complete_identifier_citations
 from .llm_client import LLMClient, LLMGenerationError, LLMUnavailable, client_from_env
 from .prompt import PROMPT_VERSION, RESPONSE_SCHEMA, LLMOutputError, build_messages, parse_llm_output
 from .report_schema import (
+    LLM_SECTIONS,
     SECTION_TITLES,
     Agent5Output,
     Agent5Status,
@@ -82,6 +84,16 @@ def assemble_sections(bundle: EvidenceBundle,
     return [Section(section=s, title=SECTION_TITLES[s], statements=body[s]) for s in ReportSection]
 
 
+def _complete_citations(narrative: dict[ReportSection, list[Statement]],
+                        bundle: EvidenceBundle) -> tuple[dict[ReportSection, list[Statement]], int]:
+    out, n = {}, 0
+    for sec, stmts in narrative.items():
+        done = [complete_identifier_citations(s, bundle, LLM_SECTIONS) for s in stmts]
+        n += sum(len(d.added_fact_ids) for d in done)
+        out[sec] = done
+    return out, n
+
+
 class ExplanationGeneratorAgent:
     """Agent 5. ``llm_client="auto"`` reads configuration from the environment;
     ``None`` forces the template writer; any object with ``complete_json`` is used as the LLM."""
@@ -98,9 +110,12 @@ class ExplanationGeneratorAgent:
         state["agent5_output"] = self.generate(state)
         return state
 
-    def generate(self, state: dict) -> Agent5Output:
+    def generate(self, state: dict, bundle: Optional[EvidenceBundle] = None,
+                 force_template: bool = False) -> Agent5Output:
+        """Write the report. ``bundle`` reuses an existing evidence bundle;
+        ``force_template`` skips the LLM (used for the validation fallback)."""
         try:
-            return self._generate(state)
+            return self._generate(state, bundle, force_template)
         except Exception as exc:  # noqa: BLE001
             logger.error("Agent 5 failed: %s", type(exc).__name__)
             tx = state.get("transaction")
@@ -112,23 +127,29 @@ class ExplanationGeneratorAgent:
                 decision=decision_from_agent4(state.get("agent4_output")),
             )
 
-    def _generate(self, state: dict) -> Agent5Output:
-        bundle = build_evidence_bundle(state)
+    def _generate(self, state: dict, bundle: Optional[EvidenceBundle] = None,
+                  force_template: bool = False) -> Agent5Output:
+        bundle = bundle if bundle is not None else build_evidence_bundle(state)
+        llm = None if force_template else self._llm
         warnings: list[str] = []
         if bundle.missing_inputs:
             warnings.append("Missing upstream outputs: " + ", ".join(bundle.missing_inputs))
 
         narrative: Optional[dict[ReportSection, list[Statement]]] = None
         attempts, fallback_reason = 0, None
-        if self._llm is not None:
+        if llm is not None:
             system, user = build_messages(bundle)
             prompt_user = user
             for _ in range(self._max_attempts):
                 attempts += 1
                 try:
-                    text = self._llm.complete_json(system, prompt_user, schema=RESPONSE_SCHEMA)
+                    text = llm.complete_json(system, prompt_user, schema=RESPONSE_SCHEMA)
                     narrative, w = parse_llm_output(text, bundle)
                     warnings.extend(w)
+                    narrative, n_added = _complete_citations(narrative, bundle)
+                    if n_added:
+                        warnings.append(f"{n_added} identifier citation(s) added by code to LLM statements "
+                                        "(recorded in added_fact_ids).")
                     fallback_reason = None
                     break
                 except LLMGenerationError as exc:
@@ -151,7 +172,7 @@ class ExplanationGeneratorAgent:
             status = Agent5Status.PARTIAL
         elif generator == Generator.LLM:
             status = Agent5Status.COMPLETE
-        elif self._llm is not None:
+        elif llm is not None:
             status = Agent5Status.FALLBACK_TEMPLATE
         else:
             status = Agent5Status.TEMPLATE
@@ -161,8 +182,8 @@ class ExplanationGeneratorAgent:
             transaction_id=bundle.transaction_id,
             status=status,
             generator=generator,
-            llm_provider=getattr(self._llm, "provider", None) if self._llm is not None else None,
-            llm_model=getattr(self._llm, "model", None) if self._llm is not None else None,
+            llm_provider=getattr(llm, "provider", None) if llm is not None else None,
+            llm_model=getattr(llm, "model", None) if llm is not None else None,
             llm_attempts=attempts,
             fallback_reason=fallback_reason if generator == Generator.TEMPLATE else None,
             prompt_version=PROMPT_VERSION if attempts else None,
