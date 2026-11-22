@@ -136,6 +136,16 @@ class CaseService:
         self._executor.submit(self._get_investigator)
         try:
             for case_id in self.store.case_ids_with_status(UNFINISHED_STATUSES):
+                rec = self.store.get(case_id)
+                if rec is not None and rec.alert.run_id:
+                    # A run case needs its run's graph and evidence store, which died with the process.
+                    self.store.update(
+                        case_id, {"status": CaseStatus.INVESTIGATION_FAILED.value,
+                                  "investigation_error": "InterruptedByRestart"},
+                        events=[AuditEvent(event_type=AuditEventType.INVESTIGATION_FAILED, actor=SYSTEM,
+                                           details={"error": "InterruptedByRestart", "run_id": rec.alert.run_id})],
+                        require_status=UNFINISHED_STATUSES)
+                    continue
                 self.store.update(case_id, {"status": CaseStatus.RECEIVED.value},
                                   events=[AuditEvent(event_type=AuditEventType.INVESTIGATION_REQUEUED, actor=SYSTEM,
                                                      details={"reason": "process restarted before completion"})],
@@ -225,7 +235,24 @@ class CaseService:
         return AlertAccepted(case_id=record.case_id, status=record.status, duplicate=False), fut
 
     # -- investigation (worker thread) -------------------------------
-    def _run(self, case_id: str) -> None:
+    def submit_job(self, fn: Callable[[], None]) -> Future:
+        """Queue other work (dataset runs) on the same single investigation worker."""
+        with self._lock:
+            if self._pending >= self._max_pending:
+                raise QueueFull()
+            self._pending += 1
+        fut = self._executor.submit(fn)
+        fut.add_done_callback(lambda _: self._done())
+        return fut
+
+    def investigator(self) -> Any:
+        return self._get_investigator()
+
+    def investigate_case(self, case_id: str, investigator: Any) -> None:
+        """Investigate synchronously; only call from a job on the worker."""
+        self._run(case_id, investigator)
+
+    def _run(self, case_id: str, investigator: Any = None) -> None:
         rec = self.store.update(case_id, {"status": CaseStatus.INVESTIGATING.value},
                                 events=[AuditEvent(event_type=AuditEventType.INVESTIGATION_STARTED, actor=SYSTEM)],
                                 require_status=UNFINISHED_STATUSES)
@@ -233,7 +260,7 @@ class CaseService:
             return  # already investigated (or not found)
         try:
             tx = CanonicalTransaction.model_validate(rec.transaction)
-            state = self._get_investigator().investigate(tx, case_id=case_id)
+            state = (investigator or self._get_investigator()).investigate(tx, case_id=case_id)
         except Exception as exc:  # noqa: BLE001
             logger.error("Case %s investigation failed: %s", case_id, type(exc).__name__)
             self.store.update(case_id, {"status": CaseStatus.INVESTIGATION_FAILED.value,

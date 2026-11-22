@@ -255,6 +255,21 @@ class IndiaBehaviourScorer:
         self.if_threshold = float(self.metadata["if_threshold"])
         self.model_version = self.metadata["model_version"]
 
+    def score_batch(self, txs: list[CanonicalTransaction]) -> tuple[list[float], list[float]]:
+        """Vectorised (fraud_probability, if_anomaly_score) for many transactions.
+
+        Same features and models as :meth:`score`, without SHAP; used to screen a
+        whole dataset before the full per-transaction investigation.
+        """
+        import pandas as pd
+
+        if not txs:
+            return [], []
+        X = pd.DataFrame([extract_features(t) for t in txs], columns=FEATURES)
+        probs = self._xgb.predict_proba(X)[:, 1]
+        if_scores = -self._iso.score_samples(X.fillna(self._medians))
+        return [float(p) for p in probs], [float(s) for s in if_scores]
+
     def score(self, tx: CanonicalTransaction, top_n: int = 8) -> dict[str, Any]:
         import pandas as pd
 

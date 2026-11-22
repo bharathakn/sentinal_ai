@@ -382,9 +382,7 @@ class NetworkAnalyserAgent:
         # ------------------------------------------------------------------
         graph_ingestion_performed = False
         try:
-            loader = TransactionGraphLoader(mgr.session, batch_size=1)
-            loader.load_transaction(transaction)
-            graph_ingestion_performed = True
+            graph_ingestion_performed = self._ingest_subject(mgr, transaction)
         except Exception as exc:  # noqa: BLE001
             warnings.append(
                 f"Graph ingestion warning: {type(exc).__name__}. "
@@ -394,11 +392,9 @@ class NetworkAnalyserAgent:
         # ------------------------------------------------------------------
         # Step 2: Resolve graph state (account existence)
         # ------------------------------------------------------------------
-        qh = GraphQueryHelper(mgr.session)
-
         try:
-            sender_in_graph = qh.account_exists(sender_id)
-            receiver_in_graph = qh.account_exists(receiver_id)
+            sender_in_graph = self._account_exists(mgr, sender_id)
+            receiver_in_graph = self._account_exists(mgr, receiver_id)
         except Exception as exc:  # noqa: BLE001
             return self._make_error_output(
                 error=f"Graph existence check failed: {type(exc).__name__}",
@@ -436,7 +432,7 @@ class NetworkAnalyserAgent:
         cfg = self._config
         graph_underpopulated = False
         try:
-            cnt = self._run(mgr, _GRAPH_TRANSFER_COUNT)
+            cnt = self._fetch_transfer_count(mgr)
             if cnt and cnt[0].get("transfers") is not None:
                 total = int(cnt[0]["transfers"])
                 if total < cfg.min_graph_transfers:
@@ -468,9 +464,9 @@ class NetworkAnalyserAgent:
         cycles: dict[str, list[dict]] = {}
         for acc in subjects:
             rows[acc] = {"in": [], "out": []}
-            for direction, cypher in (("out", _WINDOW_OUT), ("in", _WINDOW_IN)):
+            for direction in ("out", "in"):
                 try:
-                    rows[acc][direction] = self._run(mgr, cypher, account_id=acc,
+                    rows[acc][direction] = self._fetch_window(mgr, direction, account_id=acc,
                                                      from_ts=from_ts, to_ts=to_ts, limit=limit)
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"{direction} transfer query failed for {acc}: {type(exc).__name__}")
@@ -479,9 +475,8 @@ class NetworkAnalyserAgent:
                         else ["FAN_IN", "RAPID_FORWARDING", "MULE_LIKE"])
                     rows[acc][direction] = []
             try:
-                cycles[acc] = self._run(
-                    mgr,
-                    _CYCLES.format(min_len=cfg.cluster_min_edges, max_len=cfg.cluster_max_cycle_length),
+                cycles[acc] = self._fetch_cycles(
+                    mgr, min_len=cfg.cluster_min_edges, max_len=cfg.cluster_max_cycle_length,
                     account_id=acc, from_ts=from_ts, to_ts=to_ts)
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"Cycle query failed for {acc}: {type(exc).__name__}")
@@ -497,8 +492,8 @@ class NetworkAnalyserAgent:
                               from_ts=from_ts, to_ts=to_ts,
                               retention=cfg.layering_min_amount_retention,
                               max_gap_s=int(cfg.layering_hop_max_gap_hours * 3600))
-                fwd = self._run(mgr, _LAYERING_FORWARD.format(k=k), **params)
-                back = self._run(mgr, _LAYERING_BACKWARD.format(k=k), **params)
+                fwd = self._fetch_chains(mgr, "forward", k=k, **params)
+                back = self._fetch_chains(mgr, "backward", k=k, **params)
                 paths = _combine_chains(back, fwd, sender_id)
                 detectors_run.append("graph_fetch_paths")
             except Exception as exc:  # noqa: BLE001
@@ -576,6 +571,30 @@ class NetworkAnalyserAgent:
     # ------------------------------------------------------------------
     # Graph queries specific to Agent 3
     # ------------------------------------------------------------------
+
+    # Data-access methods. DatasetNetworkAnalyserAgent overrides every one of
+    # them, so an uploaded dataset never reads or writes the shared Neo4j graph.
+
+    def _ingest_subject(self, mgr, transaction: CanonicalTransaction) -> bool:
+        """MERGE the subject transaction. NB: ON MATCH overwrites its properties."""
+        TransactionGraphLoader(mgr.session, batch_size=1).load_transaction(transaction)
+        return True
+
+    def _account_exists(self, mgr, account_id: str) -> bool:
+        return GraphQueryHelper(mgr.session).account_exists(account_id)
+
+    def _fetch_transfer_count(self, mgr) -> list[dict]:
+        return self._run(mgr, _GRAPH_TRANSFER_COUNT)
+
+    def _fetch_window(self, mgr, direction: str, **params) -> list[dict]:
+        return self._run(mgr, _WINDOW_OUT if direction == "out" else _WINDOW_IN, **params)
+
+    def _fetch_cycles(self, mgr, *, min_len: int, max_len: int, **params) -> list[dict]:
+        return self._run(mgr, _CYCLES.format(min_len=min_len, max_len=max_len), **params)
+
+    def _fetch_chains(self, mgr, direction: str, *, k: int, **params) -> list[dict]:
+        template = _LAYERING_FORWARD if direction == "forward" else _LAYERING_BACKWARD
+        return self._run(mgr, template.format(k=k), **params)
 
     @staticmethod
     def _run(mgr: Neo4jConnectionManager, cypher: str, **params) -> list[dict]:

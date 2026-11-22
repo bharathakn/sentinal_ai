@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
+import contextvars
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, TypeVar
 
@@ -80,7 +81,8 @@ async def _run_sync(fn: Callable, *args, timeout: float = _PROVIDER_TIMEOUT_SEC)
     or any exception raised by the provider function.
     """
     loop = asyncio.get_event_loop()
-    fut = loop.run_in_executor(_executor, fn, *args)
+    # copy_context: providers must see the evidence store of the current investigation.
+    fut = loop.run_in_executor(_executor, contextvars.copy_context().run, fn, *args)
     return await asyncio.wait_for(fut, timeout=timeout)
 
 

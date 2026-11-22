@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import os
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -333,8 +335,48 @@ _store: Optional[EvidenceDataStore] = None
 _store_lock = threading.Lock()
 
 
+class EvidenceSourceNotConnected(Exception):
+    """There is no such source to search. This is not a NOT_FOUND result."""
+
+
+class UploadedDatasetStore:
+    """Evidence store for an uploaded dataset: no bank system is connected for its accounts.
+
+    Every lookup raises, so Agent 2 records the provider as unavailable. It must
+    not answer NOT_FOUND: Agent 4 reads "searched, not found" as a risk signal
+    (unknown device / beneficiary), and nothing was searched. Reference-dataset
+    records are never returned, even when an account id happens to be the same.
+    """
+
+    backend_name = "uploaded_dataset"
+    source_prefix = "UPLOADED_DATASET"
+    synthetic_notice = "Analyst-uploaded dataset: no bank records are connected for its accounts."
+
+    def _not_connected(self, *args, **kwargs):
+        raise EvidenceSourceNotConnected("no bank system is connected for uploaded datasets")
+
+    get_account = get_transaction_history = get_account_stats = get_device = _not_connected
+    is_device_registered_to_account = is_fraud_flagged = reference_time = _not_connected
+
+
+_override: ContextVar[Optional["EvidenceDataStore"]] = ContextVar("evidence_store_override", default=None)
+
+
+@contextmanager
+def use_store(store: EvidenceDataStore):
+    """Use ``store`` in the current context only (other threads are unaffected)."""
+    token = _override.set(store)
+    try:
+        yield store
+    finally:
+        _override.reset(token)
+
+
 def get_store() -> EvidenceDataStore:
     """Return the active store (created from SENTINEL_EVIDENCE_BACKEND on first use)."""
+    scoped = _override.get()
+    if scoped is not None:
+        return scoped
     global _store
     if _store is None:
         with _store_lock:

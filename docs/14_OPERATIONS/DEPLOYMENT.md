@@ -69,6 +69,15 @@ transactions use the India-native model. If an IEEE-CIS transaction were
 submitted, Agent 1 would return a structured `FAILED` output rather than
 crashing.
 
+## Before deploying the dataset-run dashboard
+
+- Fix the alert-endpoint graph write (API_DESIGN.md, open issue).
+- Memory with dataset runs peaked at 400 MB (local, Groq on); limit 512 MB.
+- The clean-copy rehearsal predates dataset runs: repeat it.
+- Uploads of up to 8 MB through the Vercel rewrite are untested.
+- Groq free tier: about one AI report per run of five; the rest use the
+  validated template.
+
 ## Deployment runbook (Phase 15)
 
 `render.yaml` (API) and `frontend/vercel.json` (dashboard) hold the

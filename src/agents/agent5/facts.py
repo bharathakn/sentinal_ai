@@ -188,6 +188,8 @@ def _case_facts(fb: _Facts, state: dict, tx: Any, a2: Any) -> None:
         return
     src = f"{_enum(tx.source_dataset)}_DATASET"
     mode = "SYNTHETIC" if "SYNTHETIC" in str(_enum(tx.source_dataset)) else None
+    if str(_enum(tx.source_dataset)) == "UPLOADED_DATASET":
+        mode = "UPLOADED"
     add = lambda label, value, field: fb.add(S.CASE_SUMMARY, label, value, T, src,  # noqa: E731
                                              f"transaction.{field}", source_mode=mode)
     add("Transaction id", fmt_str(tx.raw_record_id), "raw_record_id")
@@ -219,6 +221,10 @@ def _case_facts(fb: _Facts, state: dict, tx: Any, a2: Any) -> None:
            "agent2_output.beneficiary.data.customer_name",
            source_mode=_enum(getattr(ben, "source_mode", None)),
            observed_at=getattr(ben, "retrieved_at", None), reference_id=getattr(ben, "request_id", None))
+    if mode == "UPLOADED":
+        add("Data notice", "Case data comes from an analyst-uploaded file and its origin is not verified. "
+            "No bank records are connected, and the models and risk policy were calibrated on synthetic data.",
+            "source_dataset")
     if mode == "SYNTHETIC":
         add("Data notice", "All case data is SYNTHETIC; no real customer or account is involved.",
             "source_dataset")

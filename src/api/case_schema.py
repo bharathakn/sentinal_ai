@@ -50,6 +50,7 @@ DECIDABLE_STATUSES = (CaseStatus.AWAITING_REVIEW, CaseStatus.DECIDED)
 class AlertSource(str, Enum):
     API = "API"                        # full transaction supplied by the caller
     SYNTHETIC_FEED = "SYNTHETIC_FEED"  # transaction looked up in the synthetic India dataset
+    DATASET_RUN = "DATASET_RUN"        # selected by screening in a dataset run
 
 
 class AnalystAction(str, Enum):
@@ -107,6 +108,7 @@ class AlertInfo(BaseModel):
     source: AlertSource
     source_system: Optional[str] = None
     received_at_utc: datetime
+    run_id: Optional[str] = None
 
 
 class AuditEventType(str, Enum):

@@ -1,4 +1,5 @@
 // API client. All calls go to relative /api URLs (first-party cookie).
+import type { DemoInfo, Run, RunEventPage } from "./run";
 import type { AnalystAction, AuditEvent, CaseList, CaseRecord, NetworkView, User } from "./types";
 
 export class ApiError extends Error {
@@ -72,5 +73,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ transaction_id, source_system: "dashboard" }),
     }),
+  health: () => request<{ report_writer?: string }>("/health", {}, { authRedirect: false }),
+  demoInfo: () => request<DemoInfo>("/api/v1/datasets/demo"),
+  sampleCsvUrl: "/api/v1/datasets/sample.csv",
+  startDemoRun: (top: number, llm: boolean) =>
+    request<Run>(`/api/v1/runs/demo?${new URLSearchParams({ investigate_top: String(top), llm_reports: String(llm) })}`, {
+      method: "POST",
+    }),
+  startUploadRun: (file: File, top: number, llm: boolean) =>
+    request<Run>(`/api/v1/runs/upload?${new URLSearchParams({ filename: file.name, investigate_top: String(top), llm_reports: String(llm) })}`, {
+      method: "POST",
+      body: file,
+      headers: { "Content-Type": file.name.toLowerCase().endsWith(".json") ? "application/json" : "text/csv" },
+    }),
+  listRuns: () => request<{ items: Run[] }>("/api/v1/runs?limit=5"),
+  getRun: (id: string) => request<Run>(`/api/v1/runs/${encodeURIComponent(id)}`),
+  getRunEvents: (id: string, after: number) =>
+    request<RunEventPage>(`/api/v1/runs/${encodeURIComponent(id)}/events?after=${after}`),
   reportMarkdownUrl: (id: string) => `/api/v1/cases/${encodeURIComponent(id)}/report?format=markdown`,
 };

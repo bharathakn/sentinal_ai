@@ -17,7 +17,7 @@ import re
 
 from .report_schema import LLM_SECTIONS, SECTION_TITLES, EvidenceBundle, ReportSection, Statement, StatementOrigin
 
-PROMPT_VERSION = "1.1.0"
+PROMPT_VERSION = "1.2.0"
 MAX_STATEMENTS_PER_SECTION = 8
 MAX_STATEMENT_CHARS = 700
 
@@ -38,7 +38,7 @@ Rules — follow all of them:
 10. Plain professional English. 2 to 6 statements per section, each at most 60 words.
 
 Write exactly these sections:
-- CASE_SUMMARY: who, what, when, how much, which channel; that the data is synthetic.
+- CASE_SUMMARY: who, what, when, how much, which channel; what the data notice says about the data.
 - ANOMALY_FINDINGS: what the models reported and the main model drivers.
 - EVIDENCE_SUMMARY: what each evidence source returned, including gaps and caveats.
 - NETWORK_ANALYSIS: the network patterns found (or that none were found), with the key transfers.
@@ -75,10 +75,13 @@ class LLMOutputError(ValueError):
 
 
 PROMPT_MAX_TRANSFERS_PER_FINDING = 3
+#: Above this size the completion allowance (GROQ_TPM_LIMIT 8000) gets too small for a full report.
+PROMPT_TARGET_CHARS = 15_000
 _TRANSFER_LABEL = re.compile(r": transfer (\d+)$")
 
 
-def prompt_facts(bundle: EvidenceBundle) -> dict[str, list[list[str]]]:
+def prompt_facts(bundle: EvidenceBundle,
+                 max_transfers: int = PROMPT_MAX_TRANSFERS_PER_FINDING) -> dict[str, list[list[str]]]:
     """Compact fact view for the LLM: {section: [[id, label, value], ...]}.
 
     Source metadata is not needed by the writer (the audit trail is
@@ -90,7 +93,7 @@ def prompt_facts(bundle: EvidenceBundle) -> dict[str, list[list[str]]]:
     out: dict[str, list[list[str]]] = {}
     for f in bundle.facts:
         m = _TRANSFER_LABEL.search(f.label)
-        if m and int(m.group(1)) > PROMPT_MAX_TRANSFERS_PER_FINDING:
+        if m and int(m.group(1)) > max_transfers:
             continue
         if f.section in LLM_SECTIONS:
             out.setdefault(f.section.value, []).append([f.fact_id, f.label, f.value])
@@ -98,8 +101,13 @@ def prompt_facts(bundle: EvidenceBundle) -> dict[str, list[list[str]]]:
 
 
 def build_messages(bundle: EvidenceBundle) -> tuple[str, str]:
-    user = ("Evidence facts for case " + str(bundle.case_id) + ":\n"
-            + json.dumps(prompt_facts(bundle), ensure_ascii=False, separators=(",", ":")))
+    # Network-heavy cases send fewer per-transfer rows, so the answer still has
+    # room inside the per-minute token limit instead of being cut off mid-JSON.
+    for max_transfers in range(PROMPT_MAX_TRANSFERS_PER_FINDING, -1, -1):
+        user = ("Evidence facts for case " + str(bundle.case_id) + ":\n"
+                + json.dumps(prompt_facts(bundle, max_transfers), ensure_ascii=False, separators=(",", ":")))
+        if len(SYSTEM_PROMPT) + len(user) <= PROMPT_TARGET_CHARS:
+            break
     return SYSTEM_PROMPT, user
 
 

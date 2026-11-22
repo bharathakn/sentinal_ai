@@ -25,7 +25,8 @@ export interface CaseSummary {
 
 export interface AlertInfo {
   alert_id: string | null;
-  source: "API" | "SYNTHETIC_FEED";
+  source: "API" | "SYNTHETIC_FEED" | "DATASET_RUN";
+  run_id?: string | null;
   source_system: string | null;
   received_at_utc: string;
 }

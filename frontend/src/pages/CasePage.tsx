@@ -53,7 +53,7 @@ export function CasePage({ caseId, tab = "report" }: { caseId: string; tab?: str
 
   return (
     <div className="page">
-      <BackLink />
+      <BackLink runId={record.alert.run_id} />
       <div className="case-head">
         <div>
           <h1 className="mono">{record.case_id}</h1>
@@ -64,7 +64,9 @@ export function CasePage({ caseId, tab = "report" }: { caseId: string; tab?: str
             <span className="muted">{formatDateTime(tx.timestamp)}</span>
           </div>
         </div>
-        <Badge tone="warn" title={record.prototype_notice}>Synthetic data</Badge>
+        <Badge tone="warn" title={record.prototype_notice}>
+          {tx.source_dataset === "UPLOADED_DATASET" ? "Uploaded data, unverified" : "Synthetic data"}
+        </Badge>
       </div>
 
       {running && <Panel><Spinner label="Investigation in progress — Agents 1–5 and the Output Validator are running…" /></Panel>}
@@ -100,7 +102,7 @@ export function CasePage({ caseId, tab = "report" }: { caseId: string; tab?: str
             <Panel title="Alert">
               <KeyValue items={[
                 ["Transaction", <span className="mono">{tx.raw_record_id}</span>],
-                ["Source", `${record.alert.source === "SYNTHETIC_FEED" ? "Synthetic monitoring feed" : "API"}${record.alert.source_system ? ` (${record.alert.source_system})` : ""}`],
+                ["Source", `${record.alert.source === "SYNTHETIC_FEED" ? "Synthetic monitoring feed" : record.alert.source === "DATASET_RUN" ? "Dataset investigation" : "API"}${record.alert.source_system ? ` (${record.alert.source_system})` : ""}`],
                 ["Alert id", record.alert.alert_id ?? "—"],
                 ["Received", formatDateTime(record.alert.received_at_utc)],
                 ["Anomaly model", inv.agent1_output?.combined_confidence != null
@@ -114,8 +116,12 @@ export function CasePage({ caseId, tab = "report" }: { caseId: string; tab?: str
   );
 }
 
-function BackLink() {
-  return <button className="btn btn-ghost back" onClick={() => navigate("/")}>← Case queue</button>;
+function BackLink({ runId }: { runId?: string | null }) {
+  return (
+    <button className="btn btn-ghost back" onClick={() => navigate(runId ? `/runs/${runId}` : "/cases")}>
+      {runId ? "← Investigation report" : "← All cases"}
+    </button>
+  );
 }
 
 function NetworkTab({ caseId }: { caseId: string }) {

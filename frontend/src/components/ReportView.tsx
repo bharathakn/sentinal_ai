@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { formatDateTime, humanize } from "../lib/format";
+import { fallbackNote, formatDateTime, humanize } from "../lib/format";
 import type { Fact, RegulatoryMatch, Report, Validation } from "../lib/types";
 import { Badge, ValidationBadge } from "./ui";
 
@@ -36,7 +36,7 @@ export function ReportView({ caseId, report, validation, rejectedCount, regulato
         <ValidationBadge status={report.validation_status} />
         <span className="muted">
           Written by {report.generator === "LLM" ? `LLM (${report.llm_model})` : "template writer"}
-          {report.status === "FALLBACK_TEMPLATE" && " — LLM report failed validation and was replaced"}
+          {report.status === "FALLBACK_TEMPLATE" && ` (${fallbackNote(report.fallback_reason, rejectedCount)})`}
         </span>
         <a className="btn btn-ghost btn-xs" href={api.reportMarkdownUrl(caseId)} target="_blank" rel="noreferrer">Markdown</a>
       </div>

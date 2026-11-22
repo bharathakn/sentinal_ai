@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { Icon, Logo, STAGE_ICONS } from "../components/Icons";
 import { ApiError, api } from "../lib/api";
+import { STAGES } from "../lib/run";
 import type { User } from "../lib/types";
 
 export function LoginPage({ onSignedIn }: { onSignedIn: (u: User) => void }) {
@@ -32,8 +34,16 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (u: User) => void }) {
 
   return (
     <div className="login-wrap">
+      <div className="login-story">
+        <div className="brand brand-lg"><Logo /><span>Sentinel AI</span></div>
+        <p className="headline">Detect it, trace it, explain it, resolve it.</p>
+        <ol className="login-stages">
+          {STAGES.map((s, i) => (
+            <li key={s.name} style={{ animationDelay: `${i * 1.1}s` }}><Icon name={STAGE_ICONS[i]} /><span>{s.name}</span></li>
+          ))}
+        </ol>
+      </div>
       <form className="login-card" onSubmit={submit} aria-labelledby="login-title">
-        <div className="brand brand-lg"><img src="/favicon.svg" alt="" /><span>Sentinel AI</span></div>
         <h1 id="login-title">Analyst sign-in</h1>
         <label>
           Username

@@ -38,7 +38,7 @@ export function QueuePage() {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Case queue</h1>
+          <h1 className="headline">Every case, worst first.</h1>
           <p className="muted">Most severe recommended action first, then highest risk score, then oldest.</p>
         </div>
         <NewAlert onCreated={load} />

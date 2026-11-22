@@ -52,29 +52,35 @@ The project plan identifies:
 
 Analyst confirmation must be logged with analyst information and timestamp.
 
-## Implementation (Phase 14)
+## Implementation (Phase 14, redesigned in Phase 15)
 
-IMPLEMENTED in `frontend/`: React 19 + TypeScript, built with Vite, plain
-CSS with light and dark themes, and `react-force-graph-2d` for the network.
-It talks only to the Phase 13 API (`docs/09_BACKEND/API_DESIGN.md`) at
-relative `/api/...` URLs, so the session cookie stays first-party. Locally
-the Vite dev server proxies `/api` to FastAPI; on Vercel a rewrite does.
+`frontend/`: React 19 + TypeScript + Vite. One light theme (warm paper, serif
+headlines, deep teal) at the project owner's request; fonts are bundled.
 
-| Area (requirement above) | Implementation |
+Flow: choose a file or the demo dataset → watch the five agents → final
+report → resolve each finding.
+
+| Screen | Behaviour |
 |---|---|
-| Sign-in | Username and password, "Keep me signed in" on by default. A returning analyst with a live session goes straight to the queue. When a session expires, the analyst returns to sign-in with a message. |
-| Case queue | API priority order: recommended action, then risk score, then age. Tabs for awaiting review, all, decided, in progress and failed. Each row shows the risk-score bar, report validation badge, halted flag, status or decision, and age. Refreshes every 15 s. "Submit alert" takes a synthetic transaction id. |
-| Case detail | Header with amount, channel, accounts, time and a synthetic-data badge. Tabs: Report, Evidence, Network, Audit trail, Pipeline. The page polls while the investigation runs. |
-| Risk score | Score, recommended action, confidence, validation status and band strip; band thresholds come from the case's own Agent 4 config snapshot. Also shows overrides, SAR/STR recommendation with its "system recommendation only" note, evidence coverage, unavailable signals, policy versions, and the per-signal breakdown. Nothing is recomputed in the browser. |
-| Evidence | Agent 2 provider table (source, MOCK/SYNTHETIC mode, status, entity, retrieval time) and every evidence fact by section with its source agent and source; filterable. |
-| Network graph | `GET /cases/{id}/network`: accounts and transfers from the stored Agent 3 findings plus the investigated transfer, highlighted. Sender, receiver and finding accounts are coloured. Clicking a finding highlights its accounts; clicking an account lists its transfers. Tooltips are HTML-escaped. |
-| Audit report | Every report statement shows its fact-id citations; clicking one shows the fact's value, source, agent, mode and observation time. Statements are labelled by origin (LLM / template / system). Also shown: Output Validator results per check, the rejected-report count, regulatory references with excerpt, page and UNVERIFIED status, and a link to the Markdown export. Unvalidated reports carry a warning. |
-| Action panel | Block, Escalate, Monitor or Clear, with a required rationale. The decision is recorded against the signed-in analyst, shown with name and time, and can be revised; history is kept. The system recommendation is shown as advice: "The decision is yours". |
-| Audit | Timeline of the case audit events: actor, time, key details. |
+| Landing | Upload (CSV / JSON), demo dataset, how many flagged transactions to investigate, recent runs |
+| Live run | Screening counter and histogram, then one animated scene per agent: Detect, Gather, Trace, Assess, Explain + validator. Speed, skip, replay; earlier cases and stages are clickable |
+| Final report | Totals, what drove each finding, a plain-words conclusion, inline analyst decision, Save as PDF |
+| Cases / case | Priority queue; full report with citations, evidence, network, audit trail, pipeline |
 
-Prototype boundary: a "Prototype · synthetic data" marker in the top bar,
-the API's `prototype_notice` on the queue, and a synthetic-data badge on each
-case.
+Rules for the live view:
+- It is a pure function of the run's event log (`src/lib/run.ts`). Only the
+  pacing is added; each scene shows the agent's actual duration.
+- A template report is never described as a validation failure unless a
+  draft was rejected (`fallbackNote`).
+- "Not connected" is never shown as "No record".
+
+### Demo-run caveats (measured 2026-11-22, answer key used for evaluation only)
+
+- 2,017 of 10,000 are flagged: 1,261 fraudulent, 330 borderline, 426 legitimate.
+- These numbers are optimistic: about 70% of the demo rows are the rows the
+  India model was trained on.
+- The top 10 by anomaly signal are all layering cases, so the default top-5
+  demo shows five similar cases, all ESCALATE at about 62.
 
 ### Demonstration set (`scripts/seed_demo_cases.py`)
 

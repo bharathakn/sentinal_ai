@@ -29,6 +29,12 @@ See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
 
+Phase 15: the dashboard was redesigned at the project owner's request
+(upload or demo → five live animated agents → final report → resolve) and
+awaits their review on localhost. Nothing is deployed. Open before deploying:
+the alert-endpoint graph write, a repeated rehearsal, and a decision on
+Agent 3's cycle limit.
+
 Phase 15: deployment is prepared (`render.yaml`, `frontend/vercel.json`,
 runbook in `docs/14_OPERATIONS/DEPLOYMENT.md`) and rehearsed from a clean
 copy. The project owner is reviewing the dashboard on localhost before

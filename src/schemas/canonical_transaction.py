@@ -68,6 +68,7 @@ class DataSource(str, Enum):
     INDIA_SYNTHETIC = "INDIA_SYNTHETIC"
     LIVE_BANKING = "LIVE_BANKING"      # Future production source
     MOCK_BANKING = "MOCK_BANKING"      # Prototype mock banking API
+    UPLOADED_DATASET = "UPLOADED_DATASET"  # Analyst-uploaded file (India column layout); origin unverified
     UNKNOWN = "UNKNOWN"
 
 

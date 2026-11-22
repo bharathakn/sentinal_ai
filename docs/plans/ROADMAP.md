@@ -192,6 +192,10 @@ deterministically and remain an analyst-review item.
   copy (build, start, health, sign-in, investigation on AuraDB + Atlas);
   `xgboost-cpu` (peak memory 462 → 361 MB, identical scores); runbook in
   `docs/14_OPERATIONS/DEPLOYMENT.md`.
+- Done 2026-11-22: dashboard redesign with live dataset runs and isolated
+  uploads (`docs/10_FRONTEND/DASHBOARD.md`).
+- Before deploying: alert-endpoint graph write, repeated rehearsal, Agent 3
+  cycle-limit decision.
 - Remaining: owner review of the local preview, then the runbook steps
   (they need the owner's GitHub, Render and Vercel accounts).
 

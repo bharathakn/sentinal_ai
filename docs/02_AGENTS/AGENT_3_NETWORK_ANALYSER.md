@@ -62,3 +62,11 @@ The agent should provide structured network findings including:
 ## Provenance
 
 Network findings must identify the graph query/source and timestamp.
+
+## Known issue: cycle query limit (found 2026-11-22, not fixed)
+
+`_CYCLES` returns an arbitrary 50 cycles. Accounts in the demo graph have up
+to 91 in one window, and real SUSPICIOUS_CLUSTER findings were lost (2 of 168
+sampled cases). The in-memory graph used for uploads
+(`src/agents/agent3/dataset_graph.py`) examines up to 5,000. Changing the
+Neo4j query changes detection results, so re-run the evaluation with it.

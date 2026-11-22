@@ -32,7 +32,10 @@ Failure behaviour
 
 from __future__ import annotations
 
+import logging
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -43,6 +46,30 @@ from pydantic import BaseModel, ConfigDict
 from .sentinel_pipeline import SentinelState
 
 PIPELINE_VERSION = "1.0.0"
+logger = logging.getLogger(__name__)
+
+# observer(phase, node, record, state, update) with phase "started" | "completed"
+_OBSERVER: ContextVar[Optional[Callable]] = ContextVar("pipeline_observer", default=None)
+
+
+@contextmanager
+def observe(callback: Callable):
+    """Receive live node events for graph runs in this context (read-only)."""
+    token = _OBSERVER.set(callback)
+    try:
+        yield
+    finally:
+        _OBSERVER.reset(token)
+
+
+def _notify(*args) -> None:
+    callback = _OBSERVER.get()
+    if callback is None:
+        return
+    try:
+        callback(*args)
+    except Exception as exc:  # noqa: BLE001 — watching a run must never change its outcome
+        logger.warning("Pipeline observer failed: %s", type(exc).__name__)
 
 
 class NodeName(str, Enum):
@@ -124,6 +151,7 @@ def guarded_node(name: NodeName, fn: Callable[[dict], dict]) -> Callable[[Sentin
         started, t0 = datetime.now(timezone.utc), time.perf_counter()
         update: dict = {}
         error: Optional[str] = None
+        _notify("started", name, None, dict(state), {})
         try:
             result = fn(dict(state)) or {}
             for key in owned:
@@ -144,6 +172,7 @@ def guarded_node(name: NodeName, fn: Callable[[dict], dict]) -> Callable[[Sentin
             output_status=_status_of(update.get(owned[0])), started_at_utc=started,
             duration_ms=round((time.perf_counter() - t0) * 1000, 2), error=error,
         )
+        _notify("completed", name, record, dict(state), dict(update))
         update["pipeline_trace"] = [record]
         return update
 

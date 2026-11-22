@@ -41,3 +41,9 @@ A failed validation must result in human review.
 ## Prototype Boundary
 
 The project should clearly distinguish prototype integrations from real banking infrastructure.
+
+## Uploaded datasets
+
+Uploaded rows never enter the shared graph or draw on reference evidence, and
+are not sent to the LLM provider unless the analyst opts in for that file.
+See `docs/09_BACKEND/API_DESIGN.md`, including the open alert-endpoint issue.

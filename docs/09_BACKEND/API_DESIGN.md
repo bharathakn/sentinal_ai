@@ -217,3 +217,28 @@ with the cookie.
   providers, not banking infrastructure.
 - **One process.** The worker queue lives in memory, so run one instance.
   Interrupted cases are recovered at the next start.
+
+### Dataset runs (Phase 15)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/datasets/demo`, `/api/v1/datasets/sample.csv` | Demo facts; example upload |
+| POST | `/api/v1/runs/demo` | Investigate the demo dataset (`investigate_top` 1–10, `llm_reports`) |
+| POST | `/api/v1/runs/upload` | Raw `text/csv` or `application/json` body; 8 MB and 10,000 rows at most; LLM off unless `llm_reports=true` |
+| GET | `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/events?after=N` | Runs and their append-only event log (polled) |
+
+Agent 1 screens every row; the top N flagged by combined confidence get the
+full graph and become normal cases. Runs share the single worker (three
+active at most). A run interrupted by a restart is marked FAILED.
+
+Upload isolation (`tests/test_dataset_runs.py`):
+- allow-listed columns; labels and free-text place names are dropped;
+- source `UPLOADED_DATASET`, with its own data notice;
+- evidence providers are unavailable, not NOT_FOUND, because Agent 4 scores
+  NOT_FOUND as a risk signal;
+- Agent 3 uses an in-memory graph of the file and never reads or writes Neo4j.
+
+**Open issue:** `POST /api/v1/alerts` with a full `transaction` still reaches
+Agent 3's MERGE on the shared graph. A signed-in caller or ingest-key holder
+can add transfers or overwrite the amount, time and status of a reference
+transfer. Fix before public deployment.

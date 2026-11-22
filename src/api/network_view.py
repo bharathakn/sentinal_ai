@@ -26,11 +26,14 @@ def _edge_key(t: dict) -> str:
 
 
 def build_network_view(case: CaseRecord) -> Optional[dict[str, Any]]:
-    inv = case.investigation or {}
-    a3 = inv.get("agent3_output")
+    a3 = (case.investigation or {}).get("agent3_output")
     if a3 is None:
         return None
-    tx = case.transaction or {}
+    return network_from_outputs(case.case_id, a3, case.transaction or {})
+
+
+def network_from_outputs(case_id: Optional[str], a3: dict, tx: dict) -> dict[str, Any]:
+    """The view from a JSON-mode Agent 3 output and transaction."""
     sender = (tx.get("sender") or {}).get("account_id")
     receiver = (tx.get("receiver") or {}).get("account_id")
     tx_id = tx.get("raw_record_id")
@@ -101,7 +104,7 @@ def build_network_view(case: CaseRecord) -> Optional[dict[str, Any]]:
     used = {e["source"] for e in kept} | {e["target"] for e in kept}
     kept_nodes = [n for n in nodes.values() if n["id"] in used or n["roles"]]
     return {
-        "case_id": case.case_id,
+        "case_id": case_id,
         "agent3_status": a3.get("status"),
         "sender_account_id": sender,
         "receiver_account_id": receiver,

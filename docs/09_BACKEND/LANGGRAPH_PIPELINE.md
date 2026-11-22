@@ -111,7 +111,9 @@ The report path cannot bypass validation. The only edge out of
 
 ## Equivalence with the sequential runner (2026-11-22)
 
-72 synthetic cases (6 per scenario, template reports, AuraDB): Agent 4
+72 synthetic cases (6 per scenario, template reports, AuraDB). The first
+measurement used fixture evidence by mistake; it was repeated with India
+evidence on 2026-11-22 with the same result (0 mismatches). Agent 4
 action, score, SAR recommendation and validation status were identical to the
 previous sequential runner. All 72 were `COMPLETE` and `VALIDATED`. Graph
 overhead is a few milliseconds per case.

@@ -313,7 +313,7 @@ class AnomalyDetectorAgent:
             if transaction.source_dataset else None
 
         # --- Route India transactions to the India-native model ---
-        if source_ds == "INDIA_SYNTHETIC":
+        if source_ds in ("INDIA_SYNTHETIC", "UPLOADED_DATASET"):
             if self._india_scorer is not None:
                 return self._score_india(transaction, tx_id, source_ds, scored_at)
             warnings.append(
@@ -428,6 +428,41 @@ class AnomalyDetectorAgent:
             feature_mapping=feature_mapping,
             combined_confidence_note=COMBINED_CONFIDENCE_NOTE,
         )
+
+    def screen(self, transactions: list[CanonicalTransaction]) -> list[dict[str, Any]]:
+        """Screen many India transactions at once (no SHAP, no output objects).
+
+        Uses the same India model, thresholds and combined-confidence formula as
+        :meth:`score`, so ``combined_confidence`` here equals the value a full
+        ``score()`` of the same transaction reports. ``flagged`` is True when
+        either model is at or above its own calibrated threshold.
+        """
+        if self._india_scorer is None:
+            raise RuntimeError("Dataset screening needs the India behaviour model "
+                               f"({self._india_load_error or 'not loaded'}).")
+        sc = self._india_scorer
+        probs, if_scores = sc.score_batch(transactions)
+        out = []
+        for tx, p, s in zip(transactions, probs, if_scores):
+            combined = _compute_combined_confidence(
+                xgb_prob=p, if_anomaly_score=s, xgb_weight=self._xgb_weight,
+                if_weight=self._if_weight, if_threshold=sc.if_threshold)
+            out.append({
+                "transaction_id": tx.raw_record_id,
+                "fraud_probability": p, "xgb_flag": p >= sc.xgb_threshold,
+                "if_anomaly_score": s, "if_flag": s >= sc.if_threshold,
+                "combined_confidence": combined,
+                "flagged": p >= sc.xgb_threshold or s >= sc.if_threshold,
+            })
+        return out
+
+    @property
+    def screening_thresholds(self) -> dict[str, Any]:
+        sc = self._india_scorer
+        if sc is None:
+            return {}
+        return {"xgb_threshold": sc.xgb_threshold, "if_threshold": sc.if_threshold,
+                "model_version": sc.model_version}
 
     def score_raw(
         self,
@@ -584,6 +619,9 @@ class AnomalyDetectorAgent:
         shap = r["shap"]
         if shap is None:
             warnings.append("SHAP explanation unavailable for India model.")
+        if source_ds == "UPLOADED_DATASET":
+            warnings.append("The India model was trained on synthetic data; "
+                            "its scores on uploaded data are not validated.")
         if mapping.mapping_warning:
             warnings.append(mapping.mapping_warning)
         status = AgentStatus.COMPLETE if (shap is not None and n_mapped == len(FEATURES)) else AgentStatus.PARTIAL

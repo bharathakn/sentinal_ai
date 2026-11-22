@@ -65,6 +65,13 @@ export function statusLabel(status: string): string {
   }[status] ?? humanize(status);
 }
 
+/** Why the template writer was used. Only a rejected draft is a validation failure. */
+export function fallbackNote(reason: string | null | undefined, rejected: number): string {
+  if (rejected > 0) return "the AI draft failed validation and was replaced";
+  if (reason?.includes("429")) return "the AI writer hit Groq's rate limit";
+  return "the AI writer did not return a usable report";
+}
+
 export interface Thresholds {
   monitor_threshold: number;
   escalate_threshold: number;

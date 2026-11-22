@@ -41,10 +41,12 @@ describe("format", () => {
 
 describe("router", () => {
   it("parses queue and case routes", () => {
-    expect(parseHash("")).toEqual({ name: "queue" });
+    expect(parseHash("")).toEqual({ name: "home" });
+    expect(parseHash("#/cases")).toEqual({ name: "queue" });
+    expect(parseHash("#/runs/RUN-AB12")).toEqual({ name: "run", runId: "RUN-AB12" });
     expect(parseHash("#/cases/CASE-ABC123")).toEqual({ name: "case", caseId: "CASE-ABC123", tab: undefined });
     expect(parseHash("#/cases/CASE-1/network")).toEqual({ name: "case", caseId: "CASE-1", tab: "network" });
-    expect(parseHash("#/cases/../../x")).toEqual({ name: "queue" });
+    expect(parseHash("#/cases/../../x")).toEqual({ name: "home" });
   });
 });
 

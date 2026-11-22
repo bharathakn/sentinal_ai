@@ -14,6 +14,13 @@ GET  /api/v1/cases/{case_id}              full case: transaction, agent outputs,
 GET  /api/v1/cases/{case_id}/report       presented report (JSON, or ?format=markdown)
 GET  /api/v1/cases/{case_id}/audit        audit trail
 GET  /api/v1/cases/{case_id}/network      account network from the stored Agent 3 findings
+GET  /api/v1/datasets/demo                facts about the demo dataset
+GET  /api/v1/datasets/sample.csv          example upload file
+POST /api/v1/runs/demo                    investigate the demo dataset
+POST /api/v1/runs/upload                  investigate an uploaded CSV / JSON (raw request body)
+GET  /api/v1/runs                         recent runs
+GET  /api/v1/runs/{run_id}                one run
+GET  /api/v1/runs/{run_id}/events         live event log (?after=<seq>; polled)
 POST /api/v1/cases/{case_id}/decision     analyst decision (appended; revisions kept)
 
 Every /api/v1 endpoint except login needs a signed-in analyst (session
@@ -32,6 +39,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Optional
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
@@ -44,6 +52,9 @@ from .case_schema import (
     DecisionRequest,
 )
 from .case_store import CaseStore, CaseStoreError, case_store_from_env
+from .datasets import MAX_UPLOAD_BYTES, DatasetError, demo_info, load_demo, parse_upload, sample_csv
+from .run_store import run_store_for
+from .runs import MAX_INVESTIGATE, RunService
 from .service import CaseService, Conflict, FeedUnavailable, NotFound, QueueFull
 
 API_VERSION = "1.0.0"
@@ -84,6 +95,10 @@ def create_app(
     wait_seconds = alert_wait_seconds if alert_wait_seconds is not None else float(
         os.environ.get("SENTINEL_ALERT_WAIT_SECONDS", "180"))
 
+    from ..agents.agent5.llm_client import client_from_env
+
+    report_writer = "groq" if client_from_env() is not None else "template"
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         kwargs: dict[str, Any] = {"max_pending": int(os.environ.get("SENTINEL_MAX_PENDING_CASES", "50"))}
@@ -94,6 +109,8 @@ def create_app(
         service = CaseService(store or case_store_from_env(), **kwargs)
         service.start()
         app.state.service = service
+        app.state.runs = RunService(service, run_store_for(service.store))
+        app.state.runs.start()
         app.state.auth = AuthService(auth_store or auth_store_from_env())
         yield
         service.shutdown()
@@ -128,6 +145,10 @@ def create_app(
     async def _locked(_: Request, exc: LoginLocked):
         return JSONResponse(status_code=429, content={"detail": str(exc)},
                             headers={"Retry-After": str(exc.retry_after)})
+
+    @app.exception_handler(DatasetError)
+    async def _dataset(_: Request, exc: DatasetError):
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.exception_handler(FeedUnavailable)
     async def _feed(_: Request, exc: FeedUnavailable):
@@ -205,6 +226,7 @@ def create_app(
             "investigator_ready": svc.investigator_ready,
             "investigator_error": svc.investigator_error,
             "pending_investigations": svc.pending,
+            "report_writer": report_writer,
             "prototype_notice": PROTOTYPE_NOTICE,
         }
 
@@ -277,6 +299,54 @@ def create_app(
     @app.get("/api/v1/cases/{case_id}/audit", response_model=list[AuditEvent])
     def get_audit(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
         return svc.get(case_id).audit_trail
+
+    # -- dataset runs ---------------------------------------------------
+    def run_service(request: Request) -> RunService:
+        return request.app.state.runs
+
+    @app.get("/api/v1/datasets/demo")
+    def get_demo_info(_: User = Depends(analyst)):
+        return demo_info()
+
+    @app.get("/api/v1/datasets/sample.csv")
+    def get_sample(_: User = Depends(analyst)):
+        return PlainTextResponse(sample_csv(), media_type="text/csv",
+                                 headers={"Content-Disposition": 'attachment; filename="sentinel-sample.csv"'})
+
+    @app.post("/api/v1/runs/demo", status_code=202)
+    def run_demo(investigate_top: int = Query(5, ge=1, le=MAX_INVESTIGATE), llm_reports: bool = True,
+                 runs: RunService = Depends(run_service), user: User = Depends(analyst)):
+        return runs.create(load_demo(), user.username, investigate_top, llm_reports)
+
+    @app.post("/api/v1/runs/upload", status_code=202)
+    async def run_upload(request: Request, filename: str = Query("dataset.csv", max_length=200),
+                         investigate_top: int = Query(5, ge=1, le=MAX_INVESTIGATE), llm_reports: bool = False,
+                         runs: RunService = Depends(run_service), user: User = Depends(analyst)):
+        content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        if content_type not in ("text/csv", "application/json"):  # both force a CORS preflight or are same-origin
+            raise HTTPException(status_code=415, detail="Send the file as text/csv or application/json.")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413,
+                                    detail=f"The file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+        dataset = await run_in_threadpool(parse_upload, bytes(body), filename)
+        return await run_in_threadpool(runs.create, dataset, user.username, investigate_top, llm_reports)
+
+    @app.get("/api/v1/runs")
+    def list_runs(limit: int = Query(10, ge=1, le=50), runs: RunService = Depends(run_service),
+                  _: User = Depends(analyst)):
+        return {"items": runs.store.list(limit)}
+
+    @app.get("/api/v1/runs/{run_id}")
+    def get_run(run_id: str, runs: RunService = Depends(run_service), _: User = Depends(analyst)):
+        return runs.get(run_id)
+
+    @app.get("/api/v1/runs/{run_id}/events")
+    def get_run_events(run_id: str, after: int = Query(0, ge=0), runs: RunService = Depends(run_service),
+                       _: User = Depends(analyst)):
+        return runs.events(run_id, after)
 
     @app.post("/api/v1/cases/{case_id}/decision", response_model=CaseRecord)
     def decide(case_id: str, decision: DecisionRequest, svc: CaseService = Depends(service),

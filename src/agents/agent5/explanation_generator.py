@@ -84,6 +84,15 @@ def assemble_sections(bundle: EvidenceBundle,
     return [Section(section=s, title=SECTION_TITLES[s], statements=body[s]) for s in ReportSection]
 
 
+UPLOAD_REPORT_NOTE = (
+    "DRAFT generated from structured investigation evidence about an analyst-uploaded dataset of "
+    "unverified origin. Every statement cites evidence fact ids. Decision values are copied from the "
+    "deterministic Risk Assessor, whose models and policy were calibrated on synthetic data. The report "
+    "is not validated until the Output Validator has checked it, and any SAR/STR decision belongs to a "
+    "qualified human."
+)
+
+
 def _complete_citations(narrative: dict[ReportSection, list[Statement]],
                         bundle: EvidenceBundle) -> tuple[dict[ReportSection, list[Statement]], int]:
     out, n = {}, 0
@@ -115,7 +124,11 @@ class ExplanationGeneratorAgent:
         """Write the report. ``bundle`` reuses an existing evidence bundle;
         ``force_template`` skips the LLM (used for the validation fallback)."""
         try:
-            return self._generate(state, bundle, force_template)
+            report = self._generate(state, bundle, force_template)
+            source = getattr(state.get("transaction"), "source_dataset", None)
+            if str(getattr(source, "value", source)) == "UPLOADED_DATASET":
+                report = report.model_copy(update={"report_note": UPLOAD_REPORT_NOTE})
+            return report
         except Exception as exc:  # noqa: BLE001
             logger.error("Agent 5 failed: %s", type(exc).__name__)
             tx = state.get("transaction")

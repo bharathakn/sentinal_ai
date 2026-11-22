@@ -207,3 +207,10 @@ PYTHONPATH=. .venv/bin/python scripts/run_investigation.py TXN_IND_202608_000977
 Tests: `tests/test_agent5_explanation_generator.py` uses fake LLM clients
 and mocked HTTP. Set `SENTINEL_LIVE_LLM_TESTS=1` to run one live Groq test.
 The offline suite always forces the template writer (`tests/conftest.py`).
+
+## Prompt size (prompt 1.2.0)
+
+Network-heavy cases send fewer per-transfer rows to keep the prompt near
+15,000 characters. Larger prompts left 1,200 completion tokens, the JSON was
+truncated, and the retry exhausted the Groq per-minute quota. The evidence
+bundle and report still hold every transfer.
