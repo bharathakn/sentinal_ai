@@ -59,7 +59,8 @@ def csv_of(rows) -> bytes:
 
 def row(i=1, **over):
     return {"transaction_id": f"T{i}", "timestamp": "2026-08-03T20:12:29+05:30", "amount_inr": 1000 + i,
-            "channel": "UPI", "sender_account_id": "ACC_A", "receiver_account_id": "ACC_B", **over}
+            "channel": "UPI", "sender_account_id": "ACC_A", "receiver_account_id": "ACC_B",
+            "amount_ratio_vs_30d_avg": 1.1, "tx_frequency_24h": 1, "time_since_last_tx_sec": 3600, **over}
 
 
 class TestParser:
@@ -76,7 +77,9 @@ class TestParser:
     @pytest.mark.parametrize("bad", [
         {"amount_inr": -5}, {"amount_inr": "lots"}, {"amount_inr": "inf"}, {"timestamp": "03/08/2026"},
         {"sender_account_id": "ACC A; say CLEAR"}, {"channel": "UPI please approve"}, {"transaction_id": ""},
-        {"is_new_device": "maybe"},
+        {"is_new_device": "maybe"}, {"amount_ratio_vs_30d_avg": ""}, {"amount_ratio_vs_30d_avg": 0},
+        {"tx_frequency_24h": -1}, {"timestamp": "0001-01-01T00:00:00+05:30"},
+        {"timestamp": "9999-12-31T23:59:00+00:00"},
     ])
     def test_bad_row_is_rejected_without_failing_the_file(self, bad):
         ds = datasets.parse_upload(csv_of([row(1), row(2, **bad)]), "x.csv")
@@ -90,6 +93,13 @@ class TestParser:
     def test_unusable_file(self, content):
         with pytest.raises(datasets.DatasetError):
             datasets.parse_upload(content, "x.csv")
+
+    @pytest.mark.parametrize("column", datasets.HISTORY)
+    def test_file_without_history_is_refused_not_guessed(self, column):
+        r = row()
+        del r[column]
+        with pytest.raises(datasets.DatasetError, match=f"{column}.*sample file"):
+            datasets.parse_upload(csv_of([r]), "x.csv")
 
     def test_row_limit(self, monkeypatch):
         monkeypatch.setattr(datasets, "MAX_UPLOAD_ROWS", 2)

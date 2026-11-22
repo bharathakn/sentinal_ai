@@ -72,7 +72,7 @@ export function HomePage() {
         <strong>{file ? file.name : "Drop your transaction file here"}</strong>
         <span className="drop-hint">
           {file ? `${(file.size / 1024).toLocaleString("en-IN", { maximumFractionDigits: 0 })} KB · ready to investigate`
-            : "CSV or JSON · up to 10,000 transactions"}
+            : "CSV or JSON in the sample file's columns · up to 10,000 transactions"}
         </span>
         <button className="btn" onClick={() => input.current?.click()}>{file ? "Choose another" : "Choose file"}</button>
         <input ref={input} type="file" accept=".csv,.json,text/csv,application/json" hidden aria-label="Transaction file"

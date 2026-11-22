@@ -30,7 +30,14 @@ MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 MAX_UPLOAD_ROWS = 10_000
 MAX_REPORTED_ERRORS = 8
 
-REQUIRED = ("transaction_id", "timestamp", "amount_inr", "channel", "sender_account_id", "receiver_account_id")
+# The account-history columns are required, not optional: Agent 1's model treats
+# their absence as suspicious. Without amount_ratio_vs_30d_avg alone it flags
+# about 73% of legitimate transactions (about 6% with it; measured on unseen
+# synthetic data, 2026-11-22). The bank-side average cannot be derived from the file.
+HISTORY = ("amount_ratio_vs_30d_avg", "tx_frequency_24h", "time_since_last_tx_sec")
+REQUIRED = ("transaction_id", "timestamp", "amount_inr", "channel", "sender_account_id",
+            "receiver_account_id") + HISTORY
+YEARS = range(1990, 2101)  # outside this, the agents' look-back windows can overflow
 _ID = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 _CODE = re.compile(r"[A-Za-z0-9_.@:\-]{1,80}")
 _ID_COLUMNS = ("transaction_id", "sender_account_id", "receiver_account_id", "sender_customer_id",
@@ -115,8 +122,10 @@ def _clean(raw: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"{col} is not a number") from None
             if not math.isfinite(number) or abs(number) > 1e13:
                 raise ValueError(f"{col} is out of range")
-            if col == "amount_inr" and number <= 0:
-                raise ValueError("amount_inr must be above zero")
+            if col in ("amount_inr", "amount_ratio_vs_30d_avg") and number <= 0:
+                raise ValueError(f"{col} must be above zero")
+            if col in HISTORY and number < 0:
+                raise ValueError(f"{col} must not be negative")
             out[col] = int(number) if col in _INT_COLUMNS else number
         elif col in _BOOL_COLUMNS:
             if text.lower() not in _BOOL:
@@ -124,9 +133,11 @@ def _clean(raw: dict[str, Any]) -> dict[str, Any]:
             out[col] = _BOOL[text.lower()]
         elif col == "timestamp":
             try:
-                datetime.fromisoformat(text)
+                year = datetime.fromisoformat(text).year
             except ValueError:
                 raise ValueError("timestamp must be ISO 8601, e.g. 2026-08-03T20:12:29+05:30") from None
+            if year not in YEARS:
+                raise ValueError(f"timestamp year must be {YEARS.start} to {YEARS.stop - 1}")
             out[col] = text
         else:
             pattern = _ID if col in _ID_COLUMNS else _CODE
@@ -171,7 +182,8 @@ def parse_upload(content: bytes, filename: Optional[str]) -> Dataset:
         raise DatasetError(f"The file has more than {MAX_UPLOAD_ROWS:,} transactions.")
     missing = [c for c in REQUIRED if c not in columns]
     if missing:
-        raise DatasetError("Missing required columns: " + ", ".join(missing) + ".")
+        raise DatasetError("Missing required columns: " + ", ".join(missing)
+                           + ". Download the sample file to see the layout the models need.")
 
     ds = Dataset("UPLOAD", safe_name(filename), [], ignored_columns=sorted(c[:64] for c in columns - set(COLUMNS))[:30])
     seen: set[str] = set()

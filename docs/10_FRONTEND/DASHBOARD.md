@@ -63,7 +63,7 @@ report → resolve each finding.
 | Screen | Behaviour |
 |---|---|
 | Landing | Upload (CSV / JSON), demo dataset, how many flagged transactions to investigate, recent runs |
-| Live run | Screening counter and histogram, then one animated scene per agent: Detect, Gather, Trace, Assess, Explain + validator. Speed, skip, replay; earlier cases and stages are clickable |
+| Live run | Screening counter and histogram, then one animated scene per agent: Detect, Gather, Trace, Assess, Explain + validator. No speed or skip controls (owner's decision); replay after completion; earlier cases and stages are clickable |
 | Final report | Totals, what drove each finding, a plain-words conclusion, inline analyst decision, Save as PDF |
 | Cases / case | Priority queue; full report with citations, evidence, network, audit trail, pipeline |
 

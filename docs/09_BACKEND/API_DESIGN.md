@@ -231,6 +231,12 @@ Agent 1 screens every row; the top N flagged by combined confidence get the
 full graph and become normal cases. Runs share the single worker (three
 active at most). A run interrupted by a restart is marked FAILED.
 
+Upload requirements: the six transaction columns plus
+`amount_ratio_vs_30d_avg`, `tx_frequency_24h` and `time_since_last_tx_sec`
+(files without them are refused: the model would flag about 73% of legitimate
+rows), ISO 8601 timestamps in 1990–2100, plain numbers. Other bank layouts,
+Excel files and formatted amounts are refused.
+
 Upload isolation (`tests/test_dataset_runs.py`):
 - allow-listed columns; labels and free-text place names are dropped;
 - source `UPLOADED_DATASET`, with its own data notice;

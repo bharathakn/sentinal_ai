@@ -14,7 +14,7 @@ const STATE_LABEL: Record<StageState, string> = {
 };
 
 export function RunPage({ runId }: { runId: string }) {
-  const { run, status, error, speed, setSpeed, skip, skipped, replay } = useRunPlayer(runId);
+  const { run, status, error, caughtUp, replay } = useRunPlayer(runId);
   // What the analyst clicked; null follows the agents.
   const [pick, setPick] = useState<{ caseId: string; stage: number | null } | null>(null);
 
@@ -28,7 +28,8 @@ export function RunPage({ runId }: { runId: string }) {
   if (phase === "waiting" && error) {
     return <><ErrorNote>{error}</ErrorNote><button className="btn" onClick={() => navigate("/")}>Back to start</button></>;
   }
-  if (status === "FAILED" && (phase === "failed" || skipped || phase === "waiting")) {
+  // A run killed by a restart has no run.failed event: its log just ends.
+  if (status === "FAILED" && (phase === "failed" || caughtUp)) {
     return (
       <div className="run">
         <h1 className="headline">This investigation did not finish.</h1>
@@ -69,16 +70,7 @@ export function RunPage({ runId }: { runId: string }) {
               <button className="btn btn-ghost" onClick={() => navigate("/")}>New investigation</button>
             </>
           ) : (
-            <>
-              {pick && <button className="btn btn-primary" onClick={() => setPick(null)}>Follow live</button>}
-              {!skipped && (
-                <>
-                  <button className="btn" onClick={() => setSpeed(speed === 1 ? 2 : speed === 2 ? 4 : 1)}
-                          aria-label={`Playback speed ${speed}×`}>{speed}× speed</button>
-                  <button className="btn btn-ghost" onClick={skip}>Skip to result</button>
-                </>
-              )}
-            </>
+            pick && <button className="btn btn-primary" onClick={() => setPick(null)}>Follow live</button>
           )}
         </div>
       </div>

@@ -252,7 +252,7 @@ const HOLD_MS: Record<string, number> = {
   risk_assessor: 3200, explanation_generator: 4200, output_validator: 3400,
 };
 
-/** How long `previous` stays on screen before the next event is shown, at 1× speed. */
+/** How long `previous` stays on screen before the next event is shown. */
 export function holdAfter(previous: RunEvent | undefined, caseRank: number): number {
   if (!previous) return 0;
   const { type, data } = previous;

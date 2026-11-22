@@ -11,7 +11,6 @@ export function useRunPlayer(runId: string) {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [status, setStatus] = useState<Run["status"] | null>(null);
   const [shown, setShown] = useState(0);
-  const [speed, setSpeed] = useState(1);
   const [skipped, setSkipped] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,9 +60,9 @@ export function useRunPlayer(runId: string) {
     if (shown >= events.length) return;
     let rank = 0;
     for (let i = 0; i < shown; i++) if (events[i].type === "case.started") rank = events[i].data.rank;
-    const timer = window.setTimeout(() => setShown((n) => n + 1), holdAfter(events[shown - 1], rank) / speed);
+    const timer = window.setTimeout(() => setShown((n) => n + 1), holdAfter(events[shown - 1], rank));
     return () => window.clearTimeout(timer);
-  }, [events, shown, speed, skipped]);
+  }, [events, shown, skipped]);
 
   const run = useMemo(() => deriveRun(events.slice(0, shown)), [events, shown]);
   useEffect(() => {
@@ -73,7 +72,5 @@ export function useRunPlayer(runId: string) {
     setSkipped(false);
     setShown(0);
   }, []);
-  const skip = useCallback(() => setSkipped(true), []);
-
-  return { run, status, error, speed, setSpeed, skip, skipped, replay };
+  return { run, status, error, caughtUp: shown >= events.length, replay };
 }
