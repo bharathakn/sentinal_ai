@@ -69,53 +69,56 @@ transactions use the India-native model. If an IEEE-CIS transaction were
 submitted, Agent 1 would return a structured `FAILED` output rather than
 crashing.
 
-## Before deploying the dataset-run dashboard
+## Deployment runbook (Phase 15; checked against provider docs 2026-11-22)
 
-- Memory stress test (2026-11-22: demo and 10,000-row upload runs, three
-  queued at a time) peaked at 426 MB with the `render.yaml` allocator
-  settings; limit 512 MB.
-- The clean-copy rehearsal predates dataset runs: repeat it.
-- Uploads of up to 8 MB through the Vercel rewrite are untested.
-- Groq free tier: about one AI report per run of five; the rest use the
-  validated template.
+Rehearsed 2026-11-22 from committed files: `render.yaml` build and start
+commands, Python 3.14, 0.1 CPU / 512 MB (Render Free), AuraDB, Atlas, Groq;
+and the dashboard build on Node 26 (Vercel's default).
 
-## Deployment runbook (Phase 15)
+| Measured at 0.1 CPU | Result |
+|---|---|
+| Start to ready | 25 s, plus Render's own spin-up |
+| Demo run (5 cases) | 42–46 s |
+| Upload, 500 / 10,000 rows | 8 s / 37 s |
+| Memory | No OOM; peak 406 MB RSS |
+| Health probes (5 s timeout) | 0 of 31 failed |
 
-`render.yaml` (API) and `frontend/vercel.json` (dashboard) hold the
-configuration. Rehearsed on 2026-11-22: a clean copy of the repository with
-the Render build command (install and artifact build in under a minute
-locally), the Render start command, no `.env`, AuraDB and Atlas.
+Not testable before deploying: the Vercel → Render proxy, including uploads
+of several MB and behaviour while Render is waking up.
 
-1. **GitHub.** Push `main`. Render and Vercel deploy from the repository.
-2. **MongoDB Atlas.** Network Access → add `0.0.0.0/0`. Render's free tier
-   has no fixed outbound IP, so keep the database user's password strong.
-   The `sentinel_ai` database and its collections are created on first use.
-3. **Neo4j AuraDB.** Open the console and resume the instance if it is
-   paused. The graph is already loaded (10,000 transfers).
-4. **Render.** New → Blueprint → select the repository; `render.yaml` is
-   detected. Enter the secrets: `NEO4J_URI`, `NEO4J_USERNAME`,
-   `NEO4J_PASSWORD`, `NEO4J_DATABASE`, `MONGODB_URI`, `GROQ_API_KEY`. Set
-   `SENTINEL_CORS_ORIGINS` to a placeholder for now, and leave
-   `SENTINEL_INGEST_API_KEY` empty. Apply, wait for the first build, then
-   open `https://<service>.onrender.com/health`: expect `"status":"ok"` and
-   `"case_store":"mongodb"`.
-5. **Point the dashboard at the API.** In `frontend/vercel.json`, replace
-   `RENDER-SERVICE-NAME` with the Render service host, then commit and push.
-6. **Vercel.** Add New → Project → import the repository. Root Directory
-   `frontend`; framework Vite is detected; no environment variables. Deploy,
-   then set `SENTINEL_CORS_ORIGINS` on Render to the Vercel URL and redeploy
-   Render.
-7. **Accounts and demo cases.** From a developer machine with `.env`:
-   `SENTINEL_CASE_STORE=mongodb python scripts/manage_users.py create <user> --name "<Name>"`
-   and `SENTINEL_CASE_STORE=mongodb python scripts/seed_demo_cases.py`.
-8. **Smoke test.** On the Vercel URL: sign in, open a case, check the
-   Report, Evidence and Network tabs, record a decision, and check the
-   audit trail.
+1. **GitHub.** `git push origin main`. The repository is public: never commit
+   `.env`.
+2. **Render.** New → Blueprint → Connect the repository → branch `main`.
+   Enter the six secrets from `.env` (`NEO4J_URI`, `NEO4J_USERNAME`,
+   `NEO4J_PASSWORD`, `NEO4J_DATABASE`, `MONGODB_URI`, `GROQ_API_KEY`),
+   `SENTINEL_CORS_ORIGINS=http://localhost:5173` for now, and
+   `SENTINEL_INGEST_API_KEY` blank (a long random value if the form needs
+   one). Click Deploy Blueprint. Region is Singapore and cannot be changed
+   later (AuraDB: Singapore; Atlas: Mumbai).
+3. **Atlas, while Render builds.** Render service → Connect → Outbound: copy
+   each IP range into Atlas → Database & Network Access → IP Access List →
+   Add IP Address. `0.0.0.0/0` is NOT needed. Keep the developer IP.
+4. **Check** `https://<host>.onrender.com/health`: `case_store_ok: true`,
+   `case_store: mongodb`, `report_writer: groq`, `investigator_ready: true`.
+5. **`frontend/vercel.json`.** Replace `RENDER-SERVICE-NAME` (two places)
+   with the host name without `.onrender.com`; commit and push.
+6. **Vercel.** Sign in with the GitHub account that owns the repository.
+   Add New → Project → Import; Root Directory `frontend`; Vite; no
+   environment variables; Deploy. Share the production domain only: other
+   deployment URLs require a Vercel login.
+7. **CORS.** Render → Environment: set `SENTINEL_CORS_ORIGINS` to the Vercel
+   origin (no trailing slash) → Save and deploy.
+8. **Account**, from a developer machine:
+   `SENTINEL_CASE_STORE=mongodb .venv/bin/python scripts/manage_users.py create <user> --name "<Name>"`.
+   No seeding is needed: "Load demo dataset" creates the cases.
+9. **Smoke test** on the Vercel URL: sign in, demo run, sample-file upload,
+   a decision, its audit trail.
 
-Operating notes: on the free plan the first request after 15 idle minutes
-takes about a minute, and the sign-in page says so. AuraDB Free pauses when
-idle. The Groq free tier allows about one LLM report per minute; beyond that,
-reports fall back to the validated template.
+Updates: push, then Render → Manual Deploy → Deploy latest commit
+(auto-deploy is off). Vercel deploys on push.
+
+Before a demo: resume AuraDB if paused and open `/health` a few minutes
+early (Render Free sleeps after 15 idle minutes).
 
 ## Sign-in on the hosted deployment
 
@@ -135,8 +138,6 @@ reports fall back to the validated template.
 - **Avoid long requests through the proxy.** Vercel proxied requests have a
   time limit, so the UI should not use `POST /api/v1/alerts?wait=true`.
   Submit the alert, then poll the case.
-- **Load the demo cases** the same way:
-  `SENTINEL_CASE_STORE=mongodb python scripts/seed_demo_cases.py`.
 - **Create accounts from a developer machine** against Atlas:
 
   ```bash
@@ -179,9 +180,9 @@ demo, check that the instance is running.
 2. **Ephemeral filesystem.** Render's disk is wiped on every deploy and
    restart, so the JSON case store would lose all cases. **Decided
    (Phase 13):** MongoDB Atlas, `SENTINEL_CASE_STORE=mongodb`. Atlas Network
-   Access must allow Render's outbound addresses; on the free tier these are
-   not fixed, so use `0.0.0.0/0` with a strong database password. Cases
-   interrupted by a restart are queued again at start-up.
+   Access must allow the service's outbound IP ranges (Render → Connect →
+   Outbound; fixed per region, shared, also on Free). Cases interrupted by a
+   restart are queued again at start-up.
 3. **Cold starts.** Render's free services sleep when idle, and the first
    request takes about a minute. The UI should show a loading state.
 4. **CORS.** The FastAPI app must allow the Vercel origin. Use an env var,

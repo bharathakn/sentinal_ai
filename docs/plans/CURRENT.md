@@ -32,8 +32,9 @@ See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 Phase 15: the dashboard was redesigned at the project owner's request
 (upload or demo → five live animated agents → final report → resolve) and
 awaits their review on localhost. Nothing is deployed. Fixed 2026-11-22: the
-alert-endpoint graph write and Agent 3's cycle limit. Open before deploying:
-a repeated rehearsal.
+alert-endpoint graph write and Agent 3's cycle limit. The rehearsal under
+Render Free limits passed on 2026-11-22; the project owner deploys with the
+runbook in `docs/14_OPERATIONS/DEPLOYMENT.md`.
 
 Phase 15: deployment is prepared (`render.yaml`, `frontend/vercel.json`,
 runbook in `docs/14_OPERATIONS/DEPLOYMENT.md`) and rehearsed from a clean
@@ -170,8 +171,8 @@ Deployment target (Vercel + Render) recorded in
   Docker container `sentinel-neo4j` still exists with its own copy of the graph.
 - MongoDB Atlas: verified 2026-11-21 (MongoDB 8.0). Used by the Phase 13
   case store (`SENTINEL_CASE_STORE=mongodb`, database `sentinel_ai`). Network
-  access allows the developer IP only; Render will need `0.0.0.0/0` or
-  equivalent at deployment.
+  access allows the developer IP only; add Render's outbound IP ranges at
+  deployment (see DEPLOYMENT.md).
 - Groq and NewsAPI keys verified working.
 - Rebuild sequence: generate dataset → train India model → load graph
   (see `docs/14_OPERATIONS/DEVELOPMENT_SETUP.md`).

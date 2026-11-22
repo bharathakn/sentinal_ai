@@ -196,7 +196,7 @@ deterministically and remain an analyst-review item.
   uploads (`docs/10_FRONTEND/DASHBOARD.md`).
 - Done 2026-11-22: Agent 3 never persists (alert-endpoint graph write
   closed); cycle limit fixed and re-evaluated; varied demo selection.
-- Before deploying: repeated rehearsal.
+- Done 2026-11-22: rehearsal under Render Free limits; corrected runbook.
 - Remaining: owner review of the local preview, then the runbook steps
   (they need the owner's GitHub, Render and Vercel accounts).
 
