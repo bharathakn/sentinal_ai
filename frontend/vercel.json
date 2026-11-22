@@ -4,8 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://RENDER-SERVICE-NAME.onrender.com/api/:path*" },
-    { "source": "/health", "destination": "https://RENDER-SERVICE-NAME.onrender.com/health" }
+    { "source": "/api/:path*", "destination": "https://sentinel-ai-api-40jp.onrender.com/api/:path*" },
+    { "source": "/health", "destination": "https://sentinel-ai-api-40jp.onrender.com/health" }
   ],
   "headers": [
     {
