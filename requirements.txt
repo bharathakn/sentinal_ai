@@ -6,7 +6,9 @@
 #   .venv/bin/pip install -r requirements.txt
 
 # Core ML
-xgboost>=2.0.0
+# CPU-only build: same library and results, without the ~290 MB of bundled
+# CUDA/NCCL libraries (saves ~100 MB RSS; needed to fit Render's 512 MB).
+xgboost-cpu>=3.0.0
 scikit-learn>=1.4.0
 shap>=0.45.0
 

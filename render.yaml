@@ -1,0 +1,58 @@
+# Render Blueprint — Sentinel AI investigation API (Phase 15).
+# Render dashboard → New → Blueprint → select this repository.
+# Values marked `sync: false` are secrets: Render asks for them when the
+# Blueprint is first applied; they are never stored in the repository.
+# Full procedure: docs/14_OPERATIONS/DEPLOYMENT.md
+services:
+  - type: web
+    name: sentinel-ai-api
+    runtime: python
+    # free: sleeps after 15 min idle (~1 min cold start). starter: always on. Both have 512 MB.
+    plan: free
+    # Pick the region closest to the MongoDB Atlas cluster and the Neo4j AuraDB instance.
+    region: singapore
+    branch: main
+    autoDeploy: false
+    buildCommand: pip install -r requirements.txt && python scripts/build_artifacts.py
+    # Exactly one worker: investigations run on one in-process worker thread.
+    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips '*'
+    healthCheckPath: /health
+    envVars:
+      # --- secrets (entered in the Render dashboard) ---
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: NEO4J_DATABASE
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SENTINEL_CORS_ORIGINS        # the Vercel URL, e.g. https://sentinel-ai.vercel.app
+        sync: false
+      - key: SENTINEL_INGEST_API_KEY      # optional; leave empty unless a server-side alert source exists
+        sync: false
+      # --- configuration ---
+      - key: SENTINEL_CASE_STORE
+        value: mongodb
+      - key: MONGODB_DATABASE
+        value: sentinel_ai
+      - key: SENTINEL_EVIDENCE_BACKEND
+        value: india_synthetic
+      - key: SENTINEL_NEWS_PROVIDER
+        value: mock
+      - key: SENTINEL_REQUIRE_IEEE_MODELS
+        value: "false"
+      - key: SENTINEL_REPORT_GENERATOR
+        value: llm
+      - key: LLM_PROVIDER
+        value: groq
+      - key: SENTINEL_COOKIE_SECURE
+        value: "true"
+      - key: LANGSMITH_TRACING
+        value: "false"
+      - key: SENTINEL_LOG_LEVEL
+        value: INFO

@@ -23,11 +23,16 @@ Sentinel AI
 | 12 — LangGraph orchestration | COMPLETE |
 | 13 — Ingestion API & case store | COMPLETE |
 | 14 — Analyst dashboard & demonstration | COMPLETE |
-| **15 — Deployment (Vercel + Render)** | **NEXT** |
+| **15 — Deployment (Vercel + Render)** | **IN PROGRESS** — prepared and rehearsed; owner reviewing the local preview |
 
 See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
+
+Phase 15: deployment is prepared (`render.yaml`, `frontend/vercel.json`,
+runbook in `docs/14_OPERATIONS/DEPLOYMENT.md`) and rehearsed from a clean
+copy. The project owner is reviewing the dashboard on localhost before
+deployment.
 
 Phase 14 complete: React analyst dashboard (`frontend/`) on the Phase 13 API,
 plus the five-case demonstration (`scripts/seed_demo_cases.py`). Checked in

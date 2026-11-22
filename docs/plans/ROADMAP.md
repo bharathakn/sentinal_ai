@@ -186,7 +186,14 @@ deterministically and remain an analyst-review item.
   borderline case CLEAR at 24.30, just below MONITOR. All reports VALIDATED.
 - Spec and results: `docs/10_FRONTEND/DASHBOARD.md`.
 
-## Phase 15 — Deployment (Vercel + Render) (NEXT)
+## Phase 15 — Deployment (Vercel + Render) (IN PROGRESS)
+
+- Done 2026-11-22: `render.yaml` Blueprint; deployment rehearsal from a clean
+  copy (build, start, health, sign-in, investigation on AuraDB + Atlas);
+  `xgboost-cpu` (peak memory 462 → 361 MB, identical scores); runbook in
+  `docs/14_OPERATIONS/DEPLOYMENT.md`.
+- Remaining: owner review of the local preview, then the runbook steps
+  (they need the owner's GitHub, Render and Vercel accounts).
 
 Design and constraints: `docs/14_OPERATIONS/DEPLOYMENT.md`.
 - Render web service: build = `pip install -r requirements.txt && python scripts/build_artifacts.py`.
