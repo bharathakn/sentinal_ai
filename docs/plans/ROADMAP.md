@@ -173,13 +173,20 @@ deterministically and remain an analyst-review item.
   decision identity comes from the session. Phase 14 must call the API
   through a Vercel rewrite so the cookie is first-party.
 
-## Phase 14 — Analyst Dashboard & Demonstration (NEXT)
+## Phase 14 — Analyst Dashboard & Demonstration (COMPLETE 2026-11-22)
 
-- React analyst UI, network visualisation (React Force Graph).
-- Five-case demonstration drawn from labelled India scenarios
-  (2 fraudulent, 2 legitimate, 1 borderline).
+- `frontend/`: React 19 + TypeScript + Vite dashboard. Sign-in, priority
+  queue, case detail (report with clickable fact citations and validator
+  results, evidence with sources, network graph via React Force Graph, risk
+  breakdown, audit trail, pipeline trace), and the analyst action panel.
+- `GET /api/v1/cases/{id}/network`: graph built from the stored Agent 3
+  findings only.
+- `scripts/seed_demo_cases.py`: 2 fraudulent, 2 legitimate, 1 borderline,
+  seed 14. Result: both fraud cases ESCALATE, both legitimate CLEAR, and the
+  borderline case CLEAR at 24.30, just below MONITOR. All reports VALIDATED.
+- Spec and results: `docs/10_FRONTEND/DASHBOARD.md`.
 
-## Phase 15 — Deployment (Vercel + Render)
+## Phase 15 — Deployment (Vercel + Render) (NEXT)
 
 Design and constraints: `docs/14_OPERATIONS/DEPLOYMENT.md`.
 - Render web service: build = `pip install -r requirements.txt && python scripts/build_artifacts.py`.

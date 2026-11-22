@@ -63,6 +63,7 @@ uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1   # OpenAPI doc
 | GET | `/api/v1/cases/{id}` | Full case: transaction, all agent outputs, report, validation, pipeline trace, decisions, audit trail |
 | GET | `/api/v1/cases/{id}/report` | Presented report with its validation and rejected reports (JSON), or `?format=markdown` |
 | GET | `/api/v1/cases/{id}/audit` | Audit trail |
+| GET | `/api/v1/cases/{id}/network` | Account network for the dashboard, built from the stored Agent 3 findings plus the investigated transfer (`src/api/network_view.py`). Neo4j is not queried and nothing is inferred. At most 300 transfers; the investigated and finding-linked ones are kept first. |
 | POST | `/api/v1/cases/{id}/decision` | Analyst decision |
 
 ### Alert

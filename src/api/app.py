@@ -13,6 +13,7 @@ GET  /api/v1/cases                        case queue (priority order; ?status= &
 GET  /api/v1/cases/{case_id}              full case: transaction, agent outputs, report, validation, audit
 GET  /api/v1/cases/{case_id}/report       presented report (JSON, or ?format=markdown)
 GET  /api/v1/cases/{case_id}/audit        audit trail
+GET  /api/v1/cases/{case_id}/network      account network from the stored Agent 3 findings
 POST /api/v1/cases/{case_id}/decision     analyst decision (appended; revisions kept)
 
 Every /api/v1 endpoint except login needs a signed-in analyst (session
@@ -263,6 +264,15 @@ def create_app(
         report = Agent5Output.model_validate(inv["agent5_output"])
         validation = ValidationOutput.model_validate(inv["validation_output"]) if inv.get("validation_output") else None
         return PlainTextResponse(render_markdown(report, validation=validation), media_type="text/markdown")
+
+    @app.get("/api/v1/cases/{case_id}/network")
+    def get_network(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
+        from .network_view import build_network_view
+
+        view = build_network_view(svc.get(case_id))
+        if view is None:
+            raise NotFound(f"Case {case_id} has no network analysis yet.")
+        return view
 
     @app.get("/api/v1/cases/{case_id}/audit", response_model=list[AuditEvent])
     def get_audit(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):

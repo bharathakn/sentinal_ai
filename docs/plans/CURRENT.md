@@ -22,11 +22,18 @@ Sentinel AI
 | 11 — Output Validator | COMPLETE |
 | 12 — LangGraph orchestration | COMPLETE |
 | 13 — Ingestion API & case store | COMPLETE |
-| **14 — Analyst dashboard & demonstration** | **NEXT** |
+| 14 — Analyst dashboard & demonstration | COMPLETE |
+| **15 — Deployment (Vercel + Render)** | **NEXT** |
 
 See `docs/plans/ROADMAP.md` for the plan and the reasons it changed.
 
 ## Current Objective
+
+Phase 14 complete: React analyst dashboard (`frontend/`) on the Phase 13 API,
+plus the five-case demonstration (`scripts/seed_demo_cases.py`). Checked in
+headless Chrome against the real API. Next: Phase 15, deployment on Vercel
+(`frontend/`, rewrite `/api` to Render) and Render (API), with Atlas and
+AuraDB.
 
 Phase 13 complete: FastAPI investigation API (`src/api/`). Alerts create
 cases, which are investigated on one background worker and stored in a case
@@ -65,6 +72,15 @@ End-to-end (Agents 1–4, 575 labelled cases, config 1.0.0): legitimate →
 
 Deployment target (Vercel + Render) recorded in
 `docs/14_OPERATIONS/DEPLOYMENT.md`; deploy-compatibility groundwork is done.
+
+## Phase 14 summary
+
+- Dashboard: sign-in, queue, case detail (report + citations + validation,
+  evidence, network graph, audit trail, pipeline), risk panel, decision panel.
+  Spec: `docs/10_FRONTEND/DASHBOARD.md`.
+- Network endpoint from stored Agent 3 findings (`src/api/network_view.py`).
+- Demo: 2 fraud → ESCALATE, 2 legitimate → CLEAR, borderline → CLEAR (24.30).
+- Tests: `tests/test_network_view.py`; `frontend` Vitest (15).
 
 ## Phase 13.1 summary (analyst sign-in)
 

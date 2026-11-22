@@ -287,6 +287,15 @@ class TestCaseViews:
         assert md.headers["content-type"].startswith("text/markdown")
         assert md.text.startswith(f"# Investigation Report — {cid}") and "7/7 checks passed" in md.text
 
+    def test_network_endpoint(self, store, india, tx_ids):
+        with client_for(store, india) as c:
+            cid = post_alert(c, transaction_id=tx_ids[10]).json()["case_id"]
+            v = c.get(f"/api/v1/cases/{cid}/network").json()
+            tx = c.get(f"/api/v1/cases/{cid}").json()["transaction"]
+            assert c.get("/api/v1/cases/NOPE/network").status_code == 404
+        assert v["sender_account_id"] == tx["sender"]["account_id"]
+        assert [e for e in v["edges"] if e["investigated"]][0]["raw_record_id"] == tx["raw_record_id"]
+
     def test_queue_priority_and_filters(self, store, india):
         t0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
         for cid, action, score, minute in [("CASE-A", "CLEAR", 10.0, 0), ("CASE-B", "BLOCK", 80.0, 1),

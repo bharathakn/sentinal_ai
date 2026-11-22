@@ -6,6 +6,17 @@
 
 Verify that Sentinel AI produces correct, traceable and validated investigation results.
 
+## Current status (2026-11-22)
+
+| Suite | Command | Count |
+|---|---|---|
+| Python (all phases) | `.venv/bin/python -m pytest tests/ -q` | ~1,090; live Neo4j / MongoDB tests run when `.env` has credentials |
+| Dashboard | `cd frontend && npm test` | 15 (Vitest + Testing Library) |
+
+The inventory below is the Phase 1–3 snapshot. Later suites are named after
+their component, e.g. `tests/test_pipeline_graph.py`, `tests/test_api.py`,
+`tests/test_auth.py` and `tests/test_network_view.py`.
+
 ## Testing Layers
 
 ### Unit Tests (Phases 1–3 Verified)

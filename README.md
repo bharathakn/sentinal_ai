@@ -55,8 +55,7 @@ Alert
 * MongoDB Atlas
 * Redis (optional)
 * React
-* Tailwind CSS
-* Recharts
+* TypeScript + Vite (plain CSS; Tailwind and Recharts were not needed)
 * React Force Graph
 * Groq API (Free tier)
 
@@ -92,11 +91,13 @@ A deterministic validation layer must check the generated report before it reach
 
 ## Current Status
 
-Phases 1–13 are complete: canonical schema, ML models, Agents 1–5 (anomaly
+Phases 1–14 are complete: canonical schema, ML models, Agents 1–5 (anomaly
 detection, evidence gathering, network analysis, risk assessment, grounded
 report generation), the deterministic Output Validator, LangGraph
-orchestration, and the FastAPI investigation API with its case store (JSON
-locally, MongoDB Atlas hosted). Next is Phase 14, the analyst dashboard. The authoritative
+orchestration, the FastAPI investigation API with analyst sign-in and its
+case store (JSON locally, MongoDB Atlas hosted), and the React analyst
+dashboard (`frontend/`) with the five-case demonstration. Next is Phase 15,
+deployment on Vercel + Render. The authoritative
 status, plan and open decisions live in `docs/plans/CURRENT.md` and
 `docs/plans/ROADMAP.md`.
 

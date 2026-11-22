@@ -117,6 +117,21 @@ curl -b jar -X POST 'localhost:8000/api/v1/alerts?wait=true' -H 'Content-Type: a
 curl -b jar localhost:8000/api/v1/cases
 ```
 
+### Dashboard (Phase 14)
+
+```bash
+cd frontend && npm install
+npm run dev            # http://localhost:5173; proxies /api to http://localhost:8000
+SENTINEL_API_URL=http://localhost:8010 npx vite --port 5174   # other ports if those are taken
+npm test               # Vitest
+npm run build          # typecheck + production build into frontend/dist
+```
+
+Demo cases (2 fraudulent, 2 legitimate, 1 borderline) go into the configured
+case store with
+`.venv/bin/python scripts/seed_demo_cases.py` (`--dry-run` shows the
+selection). With the LLM writer it waits 60 s between cases (Groq free tier).
+
 All case endpoints need sign-in. `SENTINEL_COOKIE_SECURE=false` is only
 needed for non-browser clients such as curl over plain http; browsers accept
 Secure cookies from `http://localhost`.

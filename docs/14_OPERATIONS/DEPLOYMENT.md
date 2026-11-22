@@ -71,6 +71,10 @@ crashing.
 
 ## Sign-in on the hosted deployment
 
+- **Vercel project.** Root directory `frontend`, framework Vite, output
+  `dist`. `frontend/vercel.json` holds the rewrites; replace
+  `RENDER-SERVICE-NAME` with the Render service host before deploying. No
+  Vercel environment variables are needed.
 - **Proxy the API through Vercel.** The Vercel app proxies the API with a
   rewrite in `vercel.json`, so the session cookie is first-party:
 
@@ -83,6 +87,8 @@ crashing.
 - **Avoid long requests through the proxy.** Vercel proxied requests have a
   time limit, so the UI should not use `POST /api/v1/alerts?wait=true`.
   Submit the alert, then poll the case.
+- **Load the demo cases** the same way:
+  `SENTINEL_CASE_STORE=mongodb python scripts/seed_demo_cases.py`.
 - **Create accounts from a developer machine** against Atlas:
 
   ```bash
