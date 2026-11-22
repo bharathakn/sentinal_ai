@@ -331,3 +331,34 @@ def test_batch_screen_equals_full_score():
     txs = list(datasets.load_demo().transactions())[::500]
     for tx, hit in zip(txs, agent.screen(txs)):
         assert agent.score(tx).combined_confidence == pytest.approx(hit["combined_confidence"], abs=1e-6)
+
+
+@pytest.mark.skipif(not datasets.DEMO_DIR.exists(), reason="India dataset not built")
+def test_demo_selection_is_varied_and_repeatable():
+    from src.agents.agent1 import AnomalyDetectorAgent
+    from src.api.demo_selection import LEADS, pick_varied
+
+    txs = list(datasets.load_demo().transactions())
+    res = AnomalyDetectorAgent().screen(txs)
+    ranked = sorted((i for i, r in enumerate(res) if r["flagged"]), key=lambda i: -res[i]["combined_confidence"])
+    picks = pick_varied(txs, ranked, 5)
+    assert picks == pick_varied(txs, ranked, 5)
+    assert sorted(lead for _, lead in picks) == sorted(LEADS[:5])
+    ten = pick_varied(txs, ranked, 10)
+    assert len({i for i, _ in ten}) == 10
+    assert {lead for _, lead in ten if lead} == set(LEADS)
+
+
+def test_supplied_alert_cannot_stand_in_for_a_feed_case(tmp_path):
+    from src.api.case_schema import AlertRequest
+    from src.api.service import CaseService
+
+    real = row(77)
+    svc = CaseService(JsonCaseStore(tmp_path / "cases"), feed_lookup=lambda _: real,
+                      investigator_factory=lambda: None)
+    svc._submit = lambda *a, **k: None  # only case creation matters here
+    forged = IndiaSyntheticAdapter.from_row({**real, "amount_inr": 1})
+    first, _ = svc.ingest(AlertRequest(transaction=forged))
+    second, _ = svc.ingest(AlertRequest(transaction_id="T77"))
+    assert second.duplicate is False and second.case_id != first.case_id
+    svc.shutdown()

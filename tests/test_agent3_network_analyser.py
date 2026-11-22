@@ -885,6 +885,8 @@ def _make_mock_manager(
 
     mock_session.run = MagicMock(side_effect=run_side_effect)
     mock_session.execute_write = MagicMock(return_value=None)
+    # Agent 3 queries inside one transaction that it rolls back
+    mock_session.begin_transaction.return_value.run = mock_session.run
 
     return mgr
 

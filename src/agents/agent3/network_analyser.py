@@ -12,7 +12,8 @@ Agent 3 is the third stage of the Sentinel AI investigation pipeline:
 Design rules
 ------------
 * Reuses Phase 7 graph infrastructure (connection, loader, queries, schema).
-* Ingests the subject transaction idempotently if required.
+* Never persists anything: the subject transaction is staged in a working
+  transaction that is always rolled back.
 * Does NOT create a competing Neo4j connection layer.
 * All pattern detectors are isolated in detectors.py and independently testable.
 * Graph failures are reported explicitly — never silently converted into a
@@ -42,8 +43,9 @@ to be installed.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from ...schemas.canonical_transaction import CanonicalTransaction
 from ...graph.connection import (
@@ -53,7 +55,7 @@ from ...graph.connection import (
     Neo4jConnectivityError,
 )
 from ...graph.loader import TransactionGraphLoader
-from ...graph.mapping import make_tx_graph_id
+from ...graph.mapping import make_tx_graph_id, validate_for_graph
 from ...graph.queries import GraphQueryHelper
 from ...graph.schema import GraphSchemaManager
 
@@ -83,6 +85,10 @@ logger = logging.getLogger(__name__)
 # compared lexicographically. Hop-range integers are interpolated from
 # validated Agent3Config values (never user text); all other values are
 # query parameters.
+
+# Safety bound only. A small LIMIT drops real rings arbitrarily: up to 170
+# candidate cycles per account and window occur in the demo dataset.
+MAX_CYCLES = 5_000
 
 _TRANSFER_FIELDS = """
     r.tx_graph_id   AS tx_graph_id,
@@ -153,7 +159,7 @@ WHERE all(x IN rels WHERE x.timestamp_utc >= $from_ts AND x.timestamp_utc <= $to
 // a ring m1→m2→…→m1 is only ordered when read from the account that started it.
 RETURN [n IN nodes(p) | n.account_id] AS node_ids,
        [c IN rels | """ + _REL_MAP + """] AS transfers
-LIMIT 50
+LIMIT """ + str(MAX_CYCLES) + """
 """
 
 
@@ -177,6 +183,26 @@ def _combine_chains(back: list[dict], fwd: list[dict], sender_id: str) -> list[d
                 "transfers": list(b["transfers"]) + list(f["transfers"]),
             })
     return out
+
+
+class _UncommittedGraph:
+    """Stands in for the connection manager: every query runs in one open transaction."""
+
+    def __init__(self, pending: Any) -> None:
+        self._pending = pending
+
+    def session(self):
+        return nullcontext(self._pending)
+
+
+def _discard(pending: Any, session: Any) -> None:
+    # Neo4j also discards an uncommitted transaction if either call fails or the process dies.
+    for step in (pending.rollback if pending is not None else None, session.close if session is not None else None):
+        if step is not None:
+            try:
+                step()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Discarding the Agent 3 working transaction: %s", type(exc).__name__)
 
 
 class NetworkAnalyserAgent:
@@ -365,10 +391,24 @@ class NetworkAnalyserAgent:
         mgr: Neo4jConnectionManager,
         *,
         transaction: CanonicalTransaction,
+        **kwargs: Any,
+    ) -> Agent3Output:
+        """Analyse inside a working view of the graph that is never persisted."""
+        with self._working_graph(mgr, transaction) as (graph, staged, warning):
+            return self._analyse_graph(
+                graph, transaction=transaction, staged=staged, staging_warning=warning, **kwargs)
+
+    def _analyse_graph(
+        self,
+        mgr: Any,
+        *,
+        transaction: CanonicalTransaction,
         sender_id: str,
         receiver_id: str,
         agent1_output: Any,
         agent2_output: Any,
+        staged: bool,
+        staging_warning: Optional[str],
     ) -> Agent3Output:
         """Run all detectors with an established Neo4j connection."""
         findings: list[NetworkFinding] = []
@@ -378,16 +418,11 @@ class NetworkAnalyserAgent:
         detectors_skipped: list[str] = []
 
         # ------------------------------------------------------------------
-        # Step 1: Idempotently ingest the subject transaction
+        # Step 1: The subject was staged by _working_graph (rolled back afterwards)
         # ------------------------------------------------------------------
-        graph_ingestion_performed = False
-        try:
-            graph_ingestion_performed = self._ingest_subject(mgr, transaction)
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(
-                f"Graph ingestion warning: {type(exc).__name__}. "
-                "Proceeding with existing graph data."
-            )
+        graph_ingestion_performed = staged
+        if staging_warning:
+            warnings.append(staging_warning)
 
         # ------------------------------------------------------------------
         # Step 2: Resolve graph state (account existence)
@@ -483,6 +518,12 @@ class NetworkAnalyserAgent:
                 detectors_skipped.append("SUSPICIOUS_CLUSTER")
                 cycles[acc] = []
         detectors_run.append("graph_fetch_window")
+        search_truncated = False
+        for acc, found in cycles.items():
+            if len(found) >= MAX_CYCLES:
+                search_truncated = True
+                warnings.append(f"Cycle search for {acc} reached its {MAX_CYCLES} limit; "
+                                "absence of a circular pattern is not a clean result.")
 
         paths: list[dict] = []
         if anchor is not None:
@@ -541,7 +582,7 @@ class NetworkAnalyserAgent:
         # ------------------------------------------------------------------
         status = (
             Agent3Status.PARTIAL
-            if detectors_skipped or graph_underpopulated
+            if detectors_skipped or graph_underpopulated or search_truncated
             else Agent3Status.COMPLETE
         )
 
@@ -575,10 +616,31 @@ class NetworkAnalyserAgent:
     # Data-access methods. DatasetNetworkAnalyserAgent overrides every one of
     # them, so an uploaded dataset never reads or writes the shared Neo4j graph.
 
-    def _ingest_subject(self, mgr, transaction: CanonicalTransaction) -> bool:
-        """MERGE the subject transaction. NB: ON MATCH overwrites its properties."""
-        TransactionGraphLoader(mgr.session, batch_size=1).load_transaction(transaction)
-        return True
+    @contextmanager
+    def _working_graph(self, mgr, transaction: CanonicalTransaction) -> Iterator[tuple[Any, bool, Optional[str]]]:
+        """Yield (graph, staged, warning) with the subject visible but never persisted.
+
+        The detectors need the subject edge (layering anchors on it), and the subject
+        can be caller-supplied (POST /api/v1/alerts). Its MERGE, which overwrites on
+        match, therefore runs in a transaction that is ALWAYS rolled back. There is
+        no commit on this path; only the loader scripts write to the graph.
+        """
+        session = pending = None
+        warning = None
+        try:
+            try:
+                validate_for_graph(transaction)
+                session = mgr.session().__enter__()
+                pending = session.begin_transaction()
+                TransactionGraphLoader._write_transaction(pending, TransactionGraphLoader._params(transaction))
+            except Exception as exc:  # noqa: BLE001
+                warning = (f"Subject transaction could not be staged: {type(exc).__name__}. "
+                           "Proceeding with existing graph data.")
+                _discard(pending, session)
+                session = pending = None
+            yield (_UncommittedGraph(pending) if pending is not None else mgr), pending is not None, warning
+        finally:
+            _discard(pending, session)
 
     def _account_exists(self, mgr, account_id: str) -> bool:
         return GraphQueryHelper(mgr.session).account_exists(account_id)

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useContext, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { fallbackNote, formatScore, humanize } from "../../lib/format";
-import { prefersReducedMotion, useCountUp } from "../../lib/motion";
+import { QuickMotion, prefersReducedMotion, useCountUp } from "../../lib/motion";
 import type { AnomalyView, CheckView, DraftView, EvidenceProviders, DraftSection, RiskView, Step } from "../../lib/run";
 import type { NetworkView } from "../../lib/types";
 import { Icon } from "../Icons";
@@ -8,6 +8,7 @@ import { ActionBadge } from "../ui";
 import { MoneyFlow } from "./MoneyFlow";
 
 const delay = (seconds: number): CSSProperties => ({ animationDelay: `${seconds}s` });
+const REPORT_TYPING_MS = 1500;
 
 const DRIVER_NAMES: Record<string, string> = {
   log_amount: "Transaction amount",
@@ -37,7 +38,7 @@ export function DetectScene({ step }: { step?: Step<AnomalyView> }) {
 
 function Detected({ v }: { v: AnomalyView }) {
   const confidence = v.combined_confidence ?? 0;
-  const shown = useCountUp(confidence * 100, 1300);
+  const shown = useCountUp(confidence * 100, 900);
   const max = Math.max(0.001, ...v.drivers.map((d) => Math.abs(d.shap_value)));
   return (
     <div className="scene detect">
@@ -57,10 +58,10 @@ function Detected({ v }: { v: AnomalyView }) {
         <h4>What drove the score</h4>
         <ul className="drivers">
           {v.drivers.map((d, i) => (
-            <li key={d.feature} className="rise" style={delay(0.3 + i * 0.16)}>
+            <li key={d.feature} className="rise" style={delay(0.15 + i * 0.1)}>
               <span>{DRIVER_NAMES[d.feature] ?? humanize(d.feature)}</span>
               <span className="bar"><i className={d.shap_value < 0 ? "down" : ""}
-                style={{ width: `${(Math.abs(d.shap_value) / max) * 100}%`, ...delay(0.35 + i * 0.16) }} /></span>
+                style={{ width: `${(Math.abs(d.shap_value) / max) * 100}%`, ...delay(0.2 + i * 0.1) }} /></span>
               <b>{d.shap_value >= 0 ? "+" : "−"}{Math.abs(d.shap_value).toFixed(2)}</b>
             </li>
           ))}
@@ -116,7 +117,7 @@ export function GatherScene({ step }: { step?: Step<EvidenceProviders> }) {
       {items.map((p, i) => {
         const [label, tone] = found ? providerOutcome(p.status, p.error) : ["Querying…", "busy"];
         return (
-          <div key={`${found ? "r" : "q"}-${p.name}`} className={`source source-${tone} rise`} style={delay(i * (found ? 0.22 : 0.05))}>
+          <div key={`${found ? "r" : "q"}-${p.name}`} className={`source source-${tone} rise`} style={delay(i * (found ? 0.12 : 0.03))}>
             <span className="source-mark">
               {tone === "good" ? <Icon name="check" size={15} /> : tone === "bad" ? <Icon name="cross" size={15} /> : <i />}
             </span>
@@ -151,7 +152,7 @@ export function TraceScene({ step }: { step?: Step<NetworkView> }) {
           </li>
         )}
         {[...groups].map(([name, g], i) => (
-          <li key={name} className="rise" style={delay(0.7 + i * 0.35)} title={g.text}>
+          <li key={name} className="rise" style={delay(0.3 + i * 0.2)} title={g.text}>
             <strong>{humanize(name)}{g.count > 1 && <em>×{g.count}</em>}</strong>
             <p>{g.text}</p>
           </li>
@@ -171,7 +172,7 @@ export function AssessScene({ step }: { step?: Step<RiskView> }) {
 const ARC = "M30,150 A120,120 0 0 1 270,150";
 
 function Assessed({ v }: { v: RiskView }) {
-  const score = useCountUp(v.risk_score ?? 0, 1700);
+  const score = useCountUp(v.risk_score ?? 0, 1100);
   const t = v.thresholds;
   const bands: [number, number, string][] = [
     [0, t.monitor_threshold, "ok"], [t.monitor_threshold, t.escalate_threshold, "low"],
@@ -191,20 +192,20 @@ function Assessed({ v }: { v: RiskView }) {
           <circle cx="150" cy="150" r="9" className="needle" />
         </svg>
         <div className="gauge-score">{v.risk_score === null ? "—" : formatScore(score)}<small> / 100</small></div>
-        <div className="verdict rise" style={delay(1.6)}>
+        <div className="verdict rise" style={delay(0.9)}>
           <ActionBadge action={v.recommended_action} />
           <span className="muted">{humanize(v.confidence)} confidence</span>
         </div>
         {v.sar_recommendation?.recommended && (
-          <p className="small muted rise" style={delay(1.9)}>Suspicious transaction report recommended, for a human to decide.</p>
+          <p className="small muted rise" style={delay(1.1)}>Suspicious transaction report recommended, for a human to decide.</p>
         )}
       </div>
       <ul className="signals">
         {v.signals.map((s, i) => (
-          <li key={s.signal} className={`rise ${s.available ? "" : "unavailable"}`} style={delay(i * 0.16)} title={s.rationale}>
+          <li key={s.signal} className={`rise ${s.available ? "" : "unavailable"}`} style={delay(i * 0.09)} title={s.rationale}>
             <span>{humanize(s.signal)}<small>weight {Math.round(s.weight * 100)}%</small></span>
             <span className="bar">
-              {s.available && <i style={{ width: `${(s.value ?? 0) * 100}%`, ...delay(0.2 + i * 0.16) }} />}
+              {s.available && <i style={{ width: `${(s.value ?? 0) * 100}%`, ...delay(0.1 + i * 0.09) }} />}
             </span>
             <b>{s.available && s.value !== null ? s.value.toFixed(2) : "n/a"}</b>
           </li>
@@ -256,7 +257,7 @@ export function ExplainScene({ draft, check }: {
         <ul>
           {v
             ? v.checks.map((c, i) => (
-                <li key={c.check} className={`check-row pop ${c.passed ? "passed" : "failed"}`} style={delay(i * 0.24)} title={c.description}>
+                <li key={c.check} className={`check-row pop ${c.passed ? "passed" : "failed"}`} style={delay(i * 0.13)} title={c.description}>
                   <i><Icon name={c.passed ? "check" : "cross"} size={14} /></i>{CHECK_NAMES[c.check] ?? humanize(c.check)}
                 </li>
               ))
@@ -271,6 +272,7 @@ function Typed({ sections }: { sections: DraftSection[] }) {
   const excerpt = useMemo(() => sections.map((s) => ({ title: s.title, lines: s.statements.slice(0, 2) })), [sections]);
   const total = useMemo(() => excerpt.reduce((n, s) => n + s.lines.reduce((m, l) => m + l.text.length, 0), 0), [excerpt]);
   const [chars, setChars] = useState(0);
+  const typingMs = useContext(QuickMotion) ? 350 : REPORT_TYPING_MS;
   useEffect(() => {
     if (prefersReducedMotion()) {
       setChars(total);
@@ -278,12 +280,12 @@ function Typed({ sections }: { sections: DraftSection[] }) {
     }
     const start = performance.now();
     const timer = window.setInterval(() => {
-      const n = Math.round(total * Math.min(1, (performance.now() - start) / 2400));
+      const n = Math.round(total * Math.min(1, (performance.now() - start) / typingMs));
       setChars(n);
       if (n >= total) window.clearInterval(timer);
     }, 30);
     return () => window.clearInterval(timer);
-  }, [total]);
+  }, [total, typingMs]);
 
   let used = 0;
   return (

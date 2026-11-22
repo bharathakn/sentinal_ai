@@ -194,8 +194,9 @@ deterministically and remain an analyst-review item.
   `docs/14_OPERATIONS/DEPLOYMENT.md`.
 - Done 2026-11-22: dashboard redesign with live dataset runs and isolated
   uploads (`docs/10_FRONTEND/DASHBOARD.md`).
-- Before deploying: alert-endpoint graph write, repeated rehearsal, Agent 3
-  cycle-limit decision.
+- Done 2026-11-22: Agent 3 never persists (alert-endpoint graph write
+  closed); cycle limit fixed and re-evaluated; varied demo selection.
+- Before deploying: repeated rehearsal.
 - Remaining: owner review of the local preview, then the runbook steps
   (they need the owner's GitHub, Render and Vercel accounts).
 

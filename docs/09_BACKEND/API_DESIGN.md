@@ -244,7 +244,10 @@ Upload isolation (`tests/test_dataset_runs.py`):
   NOT_FOUND as a risk signal;
 - Agent 3 uses an in-memory graph of the file and never reads or writes Neo4j.
 
-**Open issue:** `POST /api/v1/alerts` with a full `transaction` still reaches
-Agent 3's MERGE on the shared graph. A signed-in caller or ingest-key holder
-can add transfers or overwrite the amount, time and status of a reference
-transfer. Fix before public deployment.
+A caller-supplied alert transaction cannot change the shared graph (Agent 3
+always rolls back) and is de-duplicated under its own `API:` key, so it cannot
+stand in for a feed transaction's case.
+
+Selection: uploads investigate the strongest signals. The demo investigates
+the strongest example of each suspected pattern (`src/api/demo_selection.py`):
+label-free, independent of the agents' verdicts, and stated in the UI.

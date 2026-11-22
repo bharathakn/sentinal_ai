@@ -323,8 +323,8 @@ class Agent3Output(BaseModel):
     graph_ingestion_performed: bool = Field(
         default=False,
         description=(
-            "True if Agent 3 ingested the subject transaction into the graph "
-            "before running detection queries."
+            "True if the subject transaction was staged in the working graph view "
+            "before detection. Staging is always rolled back: nothing is persisted."
         ),
     )
 

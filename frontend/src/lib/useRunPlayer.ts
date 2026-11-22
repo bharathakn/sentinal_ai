@@ -1,23 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api } from "./api";
 import { deriveRun, holdAfter, type Run, type RunEvent } from "./run";
 
 const TERMINAL = ["COMPLETED", "FAILED"];
-// Runs whose animation already played in this page session: coming back from a case shows the report.
-const played = new Set<string>();
 
-/** Polls a run's event log and plays it at a watchable pace. */
+// Runs started in this tab, with how far each has been shown. A run is animated once: coming
+// back continues where it was, and any other way of opening it shows its current state at once.
+const started = new Map<string, number>();
+
+export function markStarted(runId: string) {
+  started.set(runId, 0);
+}
+
+/** Polls a run's event log and shows it step by step. */
 export function useRunPlayer(runId: string) {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [status, setStatus] = useState<Run["status"] | null>(null);
-  const [shown, setShown] = useState(0);
-  const [skipped, setSkipped] = useState(false);
+  const [shown, setShown] = useState(() => started.get(runId) ?? 0);
   const [error, setError] = useState<string | null>(null);
+  const shownAt = useRef(performance.now());
 
   useEffect(() => {
     let alive = true;
     let after = 0;
-    let first = true;
+    let catchingUp = !started.has(runId);
     let timer: number | undefined;
     async function poll() {
       try {
@@ -27,14 +33,11 @@ export function useRunPlayer(runId: string) {
         setError(null);
         setStatus(page.status);
         if (page.events.length) setEvents((prev) => [...prev, ...page.events]);
-        const ended = TERMINAL.includes(page.status);
-        // Opening a run that finished a while ago goes straight to its report (it can be replayed).
-        if (first && ended) {
-          const last = page.events[page.events.length - 1];
-          if (played.has(runId) || (last && Date.now() - new Date(last.at_utc).getTime() > 30000)) setSkipped(true);
+        if (catchingUp) {
+          setShown(after); // seq numbers are 1..n, so the last one is also the count
+          catchingUp = page.more;
         }
-        first = false;
-        if (!ended || page.more) timer = window.setTimeout(poll, page.more ? 0 : 600);
+        if (!TERMINAL.includes(page.status) || page.more) timer = window.setTimeout(poll, page.more ? 0 : 400);
       } catch (e) {
         if (!alive || (e instanceof ApiError && e.status === 401)) return;
         if (e instanceof ApiError && e.status === 404) {
@@ -53,24 +56,25 @@ export function useRunPlayer(runId: string) {
   }, [runId]);
 
   useEffect(() => {
-    if (skipped) {
-      setShown(events.length);
-      return;
-    }
+    shownAt.current = performance.now();
+    if (started.has(runId)) started.set(runId, shown);
+  }, [runId, shown]);
+
+  useEffect(() => {
     if (shown >= events.length) return;
     let rank = 0;
-    for (let i = 0; i < shown; i++) if (events[i].type === "case.started") rank = events[i].data.rank;
-    const timer = window.setTimeout(() => setShown((n) => n + 1), holdAfter(events[shown - 1], rank));
+    let count = 0;
+    for (let i = 0; i < shown; i++) {
+      if (events[i].type === "case.started") rank = events[i].data.rank;
+      else if (events[i].type === "screening.completed") count = events[i].data.selected.length;
+    }
+    // Measured from when the current step appeared, so arriving events never restart the wait.
+    const wait = holdAfter(events[shown - 1], rank, count) - (performance.now() - shownAt.current);
+    const timer = window.setTimeout(() => setShown((n) => n + 1), Math.max(0, wait));
     return () => window.clearTimeout(timer);
-  }, [events, shown, skipped]);
+  }, [events, shown]);
 
   const run = useMemo(() => deriveRun(events.slice(0, shown)), [events, shown]);
-  useEffect(() => {
-    if (run.phase === "complete") played.add(runId);
-  }, [run.phase, runId]);
-  const replay = useCallback(() => {
-    setSkipped(false);
-    setShown(0);
-  }, []);
-  return { run, status, error, caughtUp: shown >= events.length, replay };
+
+  return { run, status, error, caughtUp: shown >= events.length };
 }

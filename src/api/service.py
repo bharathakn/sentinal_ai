@@ -211,6 +211,10 @@ class CaseService:
             tx, source = IndiaSyntheticAdapter.from_row(row), AlertSource.SYNTHETIC_FEED
         tx = strip_ground_truth(tx)
         key = f"{getattr(tx.source_dataset, 'value', tx.source_dataset)}:{tx.raw_record_id}"
+        if source == AlertSource.API:
+            # The caller chooses source_dataset and id, so a supplied transaction must not be
+            # able to stand in for a feed transaction's case.
+            key = f"API:{key}"
 
         with self._lock:  # find + create is atomic within this process
             existing = self.store.find_active_by_transaction_key(key)

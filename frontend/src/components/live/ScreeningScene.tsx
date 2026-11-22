@@ -31,13 +31,19 @@ export function ScreeningScene({ s }: { s: Screening }) {
         {s.done && s.flagged === 0 && <p className="note note-info">Nothing crossed either model's threshold.</p>}
       </div>
       <div className={`stream ${s.done ? "stream-done" : ""}`}>
-        <h4>{s.done ? "Chosen for full investigation" : "Passing through the models"}</h4>
+        <h4>
+          {!s.done ? "Passing through the models"
+            : s.varied ? "Chosen: the strongest of each suspected pattern" : "Chosen: the strongest signals"}
+        </h4>
         <ul>
           {rows.map((t, i) => (
             <li key={`${s.done ? "sel" : "scan"}-${t.transaction_id}`} className={t.flagged ? "hit" : ""}
-                style={s.done ? { animationDelay: `${i * 0.18}s` } : undefined}>
+                style={s.done ? { animationDelay: `${i * 0.12}s` } : undefined}>
               <i className="tick" />
-              <span className="stream-id">{t.transaction_id}<small>{formatAmount(t.amount, t.currency)} · {t.channel}</small></span>
+              <span className="stream-id">
+                {s.done && t.lead ? <b className="lead">{t.lead}</b> : t.transaction_id}
+                <small>{s.done && t.lead ? `${t.transaction_id} · ` : ""}{formatAmount(t.amount, t.currency)} · {t.channel}</small>
+              </span>
               <b>{t.combined_confidence.toFixed(2)}</b>
             </li>
           ))}

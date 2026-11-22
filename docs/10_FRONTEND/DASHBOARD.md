@@ -63,7 +63,7 @@ report → resolve each finding.
 | Screen | Behaviour |
 |---|---|
 | Landing | Upload (CSV / JSON), demo dataset, how many flagged transactions to investigate, recent runs |
-| Live run | Screening counter and histogram, then one animated scene per agent: Detect, Gather, Trace, Assess, Explain + validator. No speed or skip controls (owner's decision); replay after completion; earlier cases and stages are clickable |
+| Live run | Screening counter and histogram, then one animated scene per agent: Detect, Gather, Trace, Assess, Explain + validator. About 40 seconds for five cases. No speed, skip or replay controls (owner's decision): a run animates once, and reopening it shows its current state; earlier cases and stages are clickable |
 | Final report | Totals, what drove each finding, a plain-words conclusion, inline analyst decision, Save as PDF |
 | Cases / case | Priority queue; full report with citations, evidence, network, audit trail, pipeline |
 
@@ -79,8 +79,11 @@ Rules for the live view:
 - 2,017 of 10,000 are flagged: 1,261 fraudulent, 330 borderline, 426 legitimate.
 - These numbers are optimistic: about 70% of the demo rows are the rows the
   India model was trained on.
-- The top 10 by anomaly signal are all layering cases, so the default top-5
-  demo shows five similar cases, all ESCALATE at about 62.
+- The top 10 by anomaly signal are all layering cases, so the demo picks the
+  strongest of each suspected pattern instead. The default five give
+  ESCALATE ×3, HUMAN_REVIEW and BLOCK.
+- The leads are suspicions, not the answer key: "Split payments" is planted as
+  a layering case, and "Unusual location" (BLOCK) is labelled BORDERLINE.
 
 ### Demonstration set (`scripts/seed_demo_cases.py`)
 

@@ -198,7 +198,7 @@ main { padding-bottom: 56px; }
 .strip-card { flex: 1 0 190px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 8px; padding: 5px 12px;
   border: 1px solid var(--c-border); border-radius: 13px; background: var(--c-surface); font: inherit; color: inherit;
   text-align: left; cursor: pointer; transition: border-color .3s, opacity .3s; }
-.strip-card span { font-size: 11.5px; color: var(--c-muted); }
+.strip-card > span:first-child { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--c-muted); }
 .strip-card strong { font-size: 13px; white-space: nowrap; }
 .strip-card small { font-size: 11.5px; color: var(--c-accent); }
 .strip-card > :last-child { grid-column: 2; grid-row: 1 / 3; }
@@ -236,6 +236,12 @@ main { padding-bottom: 56px; }
 .stream li b { font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .stream-id { flex: 1; min-width: 0; display: grid; font-size: 12px; overflow-wrap: anywhere; }
 .stream-id small { color: var(--c-muted); }
+.stream li .stream-id .lead { color: var(--c-text); font-size: 13px; }
+.lead-tag { margin-left: 8px; font-style: normal; font-size: 12px; font-weight: 500; color: var(--c-warn); }
+.theatre-quick { animation-duration: .2s; }
+.theatre-quick .rise, .theatre-quick .pop, .theatre-quick .bar i, .theatre-quick .stamp,
+.theatre-quick .flow-node, .theatre-quick .flow-link, .theatre-quick .coin {
+  animation-duration: .25s !important; animation-delay: 0s !important; }
 .tick { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #9bb8ae; }
 .stream li.hit { background: var(--bg-warn); }
 .hit .tick { background: #cf8f45; }
@@ -345,7 +351,7 @@ main { padding-bottom: 56px; }
 .paper-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--c-border); }
 .paper-head > span { font: 500 20px var(--serif); }
 .paper-head small { color: var(--c-muted); }
-.stamp { margin-left: auto; padding: 3px 11px; border: 1.5px solid; border-radius: 7px; font-size: 12px; animation: stamp .5s var(--ease) 1.8s both; }
+.stamp { margin-left: auto; padding: 3px 11px; border: 1.5px solid; border-radius: 7px; font-size: 12px; animation: stamp .5s var(--ease) 1s both; }
 .stamp-ok { color: var(--c-ok); }
 .stamp-bad { color: var(--c-warn); }
 .typed p { margin: 4px 0; font-size: 12.5px; color: var(--c-text-2); overflow-wrap: anywhere; }

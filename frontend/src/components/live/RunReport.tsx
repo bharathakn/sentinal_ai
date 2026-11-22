@@ -30,6 +30,7 @@ export function RunReport({ run, onWatch }: { run: LiveRun; onWatch: (caseId: st
   const r = run.result;
   if (!r) return null;
   const resolved = run.cases.filter((c) => decisions[c.id]).length;
+  const patterns = new Set(run.screening.selected.map((t) => t.lead).filter(Boolean)).size;
 
   return (
     <article className="final">
@@ -42,7 +43,12 @@ export function RunReport({ run, onWatch }: { run: LiveRun; onWatch: (caseId: st
           </h1>
           <p className="lede">
             {r.screened.toLocaleString("en-IN")} transactions were screened and {r.flagged.toLocaleString("en-IN")} looked
-            unusual to a model. The strongest {r.investigated} went through all five agents.
+            unusual to a model.{" "}
+            {run.screening.varied && patterns === r.investigated
+              ? `The strongest example of each of ${patterns} different suspected patterns went through all five agents.`
+              : run.screening.varied
+                ? `${r.investigated} went through all five agents: the strongest example of each of ${patterns} suspected patterns, then the next strongest signals.`
+                : `The strongest ${r.investigated} went through all five agents.`}
             {r.not_investigated > 0 && ` The other ${r.not_investigated.toLocaleString("en-IN")} flagged transactions were not investigated in this run.`}
             {" "}Flagged means unusual, not proven fraud.
           </p>
@@ -128,7 +134,7 @@ function Finding({ c, index, open, decision, onToggle, onWatch, onDecided }: {
       <button className="finding-row" onClick={onToggle} aria-expanded={open}>
         <span className="numeral">{c.rank}</span>
         <span className="finding-tx">
-          <strong>{formatAmount(c.tx.amount, c.tx.currency)}</strong>
+          <strong>{formatAmount(c.tx.amount, c.tx.currency)}{c.tx.lead && <em className="lead-tag">{c.tx.lead}</em>}</strong>
           <small>{c.tx.sender} → {c.tx.receiver}</small>
         </span>
         <span className="finding-score"><ScoreBar score={c.summary?.risk_score} bandAction={c.summary?.score_band_action} /></span>

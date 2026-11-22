@@ -79,3 +79,24 @@ describe("money flow layout", () => {
     expect(links).toHaveLength(3);
   });
 });
+
+describe("pacing", () => {
+  function total(cases: number): number {
+    const nodes = ["anomaly_detector", "evidence_gatherer", "network_analyser", "risk_assessor", "explanation_generator", "output_validator"];
+    const log: [RunEvent, number][] = [[ev("run.queued", {}), 0], [ev("screening.started", {}), 0]];
+    for (let i = 0; i < 20; i++) log.push([ev("screening.progress", {}), 0]);
+    log.push([ev("screening.completed", {}), 0]);
+    for (let rank = 1; rank <= cases; rank++) {
+      log.push([ev("case.started", {}), rank]);
+      for (const node of nodes) log.push([ev("agent.started", { node }), rank], [ev("agent.completed", { node }), rank]);
+      log.push([ev("case.completed", {}), rank]);
+    }
+    return log.reduce((ms, [e, rank]) => ms + holdAfter(e, rank, cases), 0) / 1000;
+  }
+
+  it("shows five cases in about 40 seconds, and ten in not much more", () => {
+    expect(total(5)).toBeGreaterThan(34);
+    expect(total(5)).toBeLessThan(43);
+    expect(total(10)).toBeLessThan(48);
+  });
+});

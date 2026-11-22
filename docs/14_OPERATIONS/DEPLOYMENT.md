@@ -71,8 +71,9 @@ crashing.
 
 ## Before deploying the dataset-run dashboard
 
-- Fix the alert-endpoint graph write (API_DESIGN.md, open issue).
-- Memory with dataset runs peaked at 400 MB (local, Groq on); limit 512 MB.
+- Memory stress test (2026-11-22: demo and 10,000-row upload runs, three
+  queued at a time) peaked at 426 MB with the `render.yaml` allocator
+  settings; limit 512 MB.
 - The clean-copy rehearsal predates dataset runs: repeat it.
 - Uploads of up to 8 MB through the Vercel rewrite are untested.
 - Groq free tier: about one AI report per run of five; the rest use the
@@ -170,7 +171,9 @@ demo, check that the instance is running.
    - `requirements.txt` uses `xgboost-cpu`: the same library and identical
      scores, without about 290 MB of bundled CUDA/NCCL files. The standard
      `xgboost` wheel peaked at about 462 MB.
-   - `MALLOC_ARENA_MAX=2` made no difference.
+   - `MALLOC_ARENA_MAX=2` made no difference to single investigations. With
+     dataset runs, the allocator settings in `render.yaml` lower the peak
+     from 461 to 426 MB.
    - Models load once per process, and the API runs one worker. Do not load
      full-size DataFrames per request.
 2. **Ephemeral filesystem.** Render's disk is wiped on every deploy and

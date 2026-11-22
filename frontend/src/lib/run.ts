@@ -30,6 +30,8 @@ export interface ScreenedTx {
   receiver: string;
   combined_confidence: number;
   flagged: boolean;
+  /** Demo only: the suspected pattern this transaction was picked as an example of. */
+  lead?: string | null;
 }
 
 export interface RunResult {
@@ -158,6 +160,8 @@ export interface Screening {
   flaggedHistogram: number[];
   stream: ScreenedTx[];
   selected: ScreenedTx[];
+  /** True when the demo picked different suspected patterns rather than the top scores. */
+  varied: boolean;
   done: boolean;
 }
 
@@ -185,7 +189,7 @@ export const STAGES: { name: string; agent: string; verb: string; blurb: string;
 
 export function deriveRun(events: RunEvent[]): LiveRun {
   const s: Screening = {
-    total: 0, screened: 0, flagged: 0, histogram: [], flaggedHistogram: [], stream: [], selected: [], done: false,
+    total: 0, screened: 0, flagged: 0, histogram: [], flaggedHistogram: [], stream: [], selected: [], varied: false, done: false,
   };
   const run: LiveRun = { phase: "waiting", dataset: null, screening: s, cases: [], result: null, error: null };
   const byId = new Map<string, LiveCase>();
@@ -204,6 +208,7 @@ export function deriveRun(events: RunEvent[]): LiveRun {
     } else if (type === "screening.completed") {
       s.done = true;
       s.selected = d.selected;
+      s.varied = d.selection_rule === "varied";
       s.flagged = d.flagged;
     } else if (type === "case.started" && case_id) {
       run.phase = "investigating";
@@ -247,23 +252,26 @@ export function currentStage(c: LiveCase): number {
   return 0;
 }
 
-const HOLD_MS: Record<string, number> = {
-  anomaly_detector: 2600, evidence_gatherer: 3200, network_analyser: 4400,
-  risk_assessor: 3200, explanation_generator: 4200, output_validator: 3400,
+// [first case, each later case], in ms. Five cases come to about 40 seconds in all.
+const HOLD_MS: Record<string, [number, number]> = {
+  anomaly_detector: [1600, 520], evidence_gatherer: [1800, 520], network_analyser: [2800, 1000],
+  risk_assessor: [2200, 750], explanation_generator: [2200, 560], output_validator: [1900, 650],
 };
 
 /** How long `previous` stays on screen before the next event is shown. */
-export function holdAfter(previous: RunEvent | undefined, caseRank: number): number {
+export function holdAfter(previous: RunEvent | undefined, caseRank: number, caseCount = 5): number {
   if (!previous) return 0;
   const { type, data } = previous;
-  if (type === "screening.started") return 500;
-  if (type === "screening.progress") return 260;
-  if (type === "screening.completed") return 3600;
-  if (type === "case.started") return 700;
-  if (type === "case.completed") return 1300;
-  // The first case plays in full; the following ones move faster.
-  const pace = caseRank > 1 ? 0.5 : 1;
-  if (type === "agent.started") return 700 * pace;
-  if (type === "agent.completed") return (HOLD_MS[data.node as string] ?? 1500) * pace;
-  return 150;
+  if (type === "screening.started") return 300;
+  if (type === "screening.progress") return 150;
+  if (type === "screening.completed") return 2200;
+  if (type.startsWith("run.")) return 100;
+  const later = caseRank > 1 ? 1 : 0;
+  // With more cases each later one is quicker, so ten cases do not take twice as long.
+  const squeeze = later && caseCount > 5 ? Math.max(0.45, 4 / (caseCount - 1)) : 1;
+  if (type === "case.started") return (later ? 300 : 500) * squeeze;
+  if (type === "case.completed") return (later ? 400 : 500) * squeeze;
+  if (type === "agent.started") return (later ? 50 : 250) * squeeze;
+  if (type === "agent.completed") return (HOLD_MS[data.node as string]?.[later] ?? 600) * squeeze;
+  return 100;
 }

@@ -4,6 +4,7 @@ import { ApiError, api } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import { STAGES, type DemoInfo, type Run } from "../lib/run";
 import { navigate } from "../lib/router";
+import { markStarted } from "../lib/useRunPlayer";
 
 const MAX_BYTES = 8 * 1024 * 1024; // the server enforces the same limit
 
@@ -49,6 +50,7 @@ export function HomePage() {
     setError(null);
     try {
       const run = kind === "demo" ? await api.startDemoRun(top, true) : await api.startUploadRun(file!, top, allowAi);
+      markStarted(run.run_id);
       navigate(`/runs/${run.run_id}`);
     } catch (e) {
       setError(e instanceof ApiError
@@ -81,11 +83,11 @@ export function HomePage() {
 
       <div className="options">
         <label className="option">
-          Fully investigate the
+          Fully investigate
           <select value={top} onChange={(e) => setTop(Number(e.target.value))} aria-label="Transactions to investigate">
-            {[1, 3, 5, 10].map((n) => <option key={n} value={n}>top {n}</option>)}
+            {[1, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-          flagged transactions
+          of the flagged transactions
         </label>
         <a className="pill pill-soft" href={api.sampleCsvUrl} download>Download a sample file</a>
       </div>

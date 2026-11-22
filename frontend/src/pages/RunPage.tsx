@@ -5,6 +5,7 @@ import { AssessScene, DetectScene, ExplainScene, GatherScene, TraceScene, Workin
 import { ScreeningScene } from "../components/live/ScreeningScene";
 import { ActionBadge, ErrorNote, Spinner } from "../components/ui";
 import { formatAmount } from "../lib/format";
+import { QuickMotion } from "../lib/motion";
 import { navigate } from "../lib/router";
 import { STAGES, currentStage, stageState, type LiveCase, type StageState } from "../lib/run";
 import { useRunPlayer } from "../lib/useRunPlayer";
@@ -14,7 +15,7 @@ const STATE_LABEL: Record<StageState, string> = {
 };
 
 export function RunPage({ runId }: { runId: string }) {
-  const { run, status, error, caughtUp, replay } = useRunPlayer(runId);
+  const { run, status, error, caughtUp } = useRunPlayer(runId);
   // What the analyst clicked; null follows the agents.
   const [pick, setPick] = useState<{ caseId: string; stage: number | null } | null>(null);
 
@@ -49,10 +50,8 @@ export function RunPage({ runId }: { runId: string }) {
       ? screening.done ? "Found the ones worth investigating." : `Screening ${screening.total.toLocaleString("en-IN")} transactions…`
       : `${STAGES[stage].verb}${states[stage] === "running" ? "…" : "."}`;
 
-  function replayAll() {
-    setPick(null);
-    replay();
-  }
+  // Later cases move faster while following live; anything the analyst clicks animates normally.
+  const quick = !complete && !pick && (active?.rank ?? 1) > 1;
 
   return (
     <div className="run">
@@ -66,7 +65,6 @@ export function RunPage({ runId }: { runId: string }) {
           {complete ? (
             <>
               {pick && <button className="btn btn-primary" onClick={() => setPick(null)}>Back to final report</button>}
-              <button className="btn" onClick={replayAll}>Replay</button>
               <button className="btn btn-ghost" onClick={() => navigate("/")}>New investigation</button>
             </>
           ) : (
@@ -109,14 +107,15 @@ export function RunPage({ runId }: { runId: string }) {
                 <button key={tx.transaction_id} disabled={!c}
                         className={`strip-card ${c?.id === active.id ? "strip-active" : ""} ${c ? "" : "strip-waiting"}`}
                         onClick={() => c && setPick(c === live && !complete ? null : { caseId: c.id, stage: null })}>
-                  <span>Case {i + 1}</span>
+                  <span title={tx.lead ?? undefined}>{tx.lead ?? `Case ${i + 1}`}</span>
                   <strong>{formatAmount(tx.amount, tx.currency)}</strong>
                   {c?.done ? <ActionBadge action={c.summary?.recommended_action} /> : <small>{c ? "Investigating…" : "In the queue"}</small>}
                 </button>
               );
             })}
           </div>
-          <section className="theatre" key={`${active.id}-${stage}`}>
+          <QuickMotion.Provider value={quick}>
+          <section className={`theatre ${quick ? "theatre-quick" : ""}`} key={`${active.id}-${stage}`}>
             <header className="theatre-head">
               <span className="numeral">{stage + 1}</span>
               <div>
@@ -127,10 +126,11 @@ export function RunPage({ runId }: { runId: string }) {
             </header>
             <Scene c={active} stage={stage} />
           </section>
+          </QuickMotion.Provider>
         </>
       )}
-      {!showReport && phase !== "waiting" && (
-        <p className="fineprint centred">Every value comes from the agent that just ran. Playback is slowed so you can follow it.</p>
+      {!complete && phase !== "waiting" && (
+        <p className="fineprint centred">Live results from each agent</p>
       )}
     </div>
   );

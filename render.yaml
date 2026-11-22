@@ -36,6 +36,13 @@ services:
       - key: SENTINEL_INGEST_API_KEY      # optional; leave empty unless a server-side alert source exists
         sync: false
       # --- configuration ---
+      # Allocator settings: dataset runs peak at 426 MB with these, 461 MB without (limit 512).
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: MALLOC_TRIM_THRESHOLD_
+        value: "131072"
+      - key: MALLOC_MMAP_THRESHOLD_
+        value: "131072"
       - key: SENTINEL_CASE_STORE
         value: mongodb
       - key: MONGODB_DATABASE

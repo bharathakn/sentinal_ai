@@ -20,13 +20,13 @@ export function MoneyFlow({ view }: { view: NetworkView }) {
         </defs>
         {links.map((l) => {
           const kind = l.investigated ? "hot" : l.flagged ? "flag" : "base";
-          const delay = l.investigated ? 0 : l.step * 0.38;
+          const delay = l.investigated ? 0 : l.step * 0.22;
           return (
             <g key={l.id}>
               <path d={l.d} pathLength={1} className={`flow-link link-${kind}`} style={{ animationDelay: `${delay}s` }}
                     markerEnd={`url(#arrow-${kind})`} />
               {moving && kind !== "base" && (
-                <circle r={kind === "hot" ? 4.5 : 3} className={`coin coin-${kind}`} style={{ animationDelay: `${delay + 0.7}s` }}>
+                <circle r={kind === "hot" ? 4.5 : 3} className={`coin coin-${kind}`} style={{ animationDelay: `${delay + 0.5}s` }}>
                   <animateMotion dur={kind === "hot" ? "1.5s" : "2.3s"} repeatCount="indefinite" path={l.d} />
                 </circle>
               )}
@@ -36,7 +36,7 @@ export function MoneyFlow({ view }: { view: NetworkView }) {
         {nodes.map((n) => (
           <g key={n.id} transform={`translate(${n.x},${n.y})`}>
             <g className={`flow-node node-${n.role}`}
-               style={{ animationDelay: `${n.role === "sender" || n.role === "receiver" ? 0 : n.step * 0.38}s` }}>
+               style={{ animationDelay: `${n.role === "sender" || n.role === "receiver" ? 0 : n.step * 0.22}s` }}>
               <title>{n.id}</title>
               {(n.role === "sender" || n.role === "receiver") && <circle r="21" className="halo" />}
               <circle r={n.role === "sender" || n.role === "receiver" ? 13 : 9} className="dot" />

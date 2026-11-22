@@ -11,18 +11,16 @@ the detectors and thresholds are unchanged.
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable, Iterator, Optional
 
 from ...graph.loader import TransactionGraphLoader
 from ...schemas.canonical_transaction import CanonicalTransaction
 from .config import Agent3Config
-from .network_analyser import NetworkAnalyserAgent
+from .network_analyser import MAX_CYCLES, NetworkAnalyserAgent
 
 MAX_EXPANSIONS = 200_000
-# Every cycle is examined. A small cap would drop real rings arbitrarily: accounts
-# in the demo dataset have more than 50 candidate cycles in one window.
-MAX_CYCLES = 5_000
 _PATH_FIELDS = ("tx_graph_id", "amount", "amount_str", "currency", "timestamp_utc", "channel")
 _WINDOW_FIELDS = ("raw_record_id",) + _PATH_FIELDS
 
@@ -142,8 +140,9 @@ class DatasetNetworkAnalyserAgent(NetworkAnalyserAgent):
     def __init__(self, graph: InMemoryTransferGraph, config: Optional[Agent3Config] = None) -> None:
         super().__init__(config=config, connection_manager=graph)
 
-    def _ingest_subject(self, mgr, transaction) -> bool:
-        return False  # the dataset already contains it; nothing is written
+    @contextmanager
+    def _working_graph(self, mgr, transaction):
+        yield mgr, False, None  # the dataset already contains it; nothing to stage
 
     def _account_exists(self, mgr, account_id) -> bool:
         return account_id in mgr.accounts

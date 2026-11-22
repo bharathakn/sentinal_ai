@@ -63,10 +63,20 @@ The agent should provide structured network findings including:
 
 Network findings must identify the graph query/source and timestamp.
 
-## Known issue: cycle query limit (found 2026-11-22, not fixed)
+## Nothing is persisted (fixed 2026-11-22)
 
-`_CYCLES` returns an arbitrary 50 cycles. Accounts in the demo graph have up
-to 91 in one window, and real SUSPICIOUS_CLUSTER findings were lost (2 of 168
-sampled cases). The in-memory graph used for uploads
-(`src/agents/agent3/dataset_graph.py`) examines up to 5,000. Changing the
-Neo4j query changes detection results, so re-run the evaluation with it.
+Agent 3 used to MERGE the subject transaction, which overwrote a matching
+transfer. Because `POST /api/v1/alerts` accepts a caller-supplied transaction,
+that allowed tampering with the reference graph. The subject is now staged in
+a transaction that is always rolled back: detectors still see it, nothing
+persists. `graph_ingestion_performed` means "staged". Only the loader scripts
+write to the graph. Tests: `tests/test_agent3_readonly.py` and the live
+`TestSubjectNeverPersistsLive`, which fails on the old code.
+
+## Cycle search (fixed 2026-11-22)
+
+`_CYCLES` returned an arbitrary 50 cycles and lost real rings (the demo graph
+has up to 170 candidates in one window). The bound is now 5,000; reaching it
+gives PARTIAL with a warning. Re-evaluation on the same 575 cases: one more
+fraudulent case shows SUSPICIOUS_CLUSTER, legitimate cases are unchanged, and
+no risk score or action changed.

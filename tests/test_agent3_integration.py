@@ -414,3 +414,53 @@ class TestCleanupIsolationLive:
 
         # Our node is gone
         assert not qh.account_exists(f"{p}A")
+
+
+# ---------------------------------------------------------------------------
+# Security: an investigated transaction never persists
+# ---------------------------------------------------------------------------
+
+class TestSubjectNeverPersistsLive:
+    _PREFIX = f"{_BASE_PREFIX}NOPERSIST_"
+
+    def _transfers(self, mgr):
+        with mgr.session() as session:
+            return sorted(
+                (r["id"], r["s"], r["t"], r["amount"], r["ts"], r["status"])
+                for r in session.run(
+                    "MATCH (a:Account)-[r:TRANSFERRED_TO]->(b:Account) WHERE a.account_id STARTS WITH $p "
+                    "RETURN r.raw_record_id AS id, a.account_id AS s, b.account_id AS t, "
+                    "r.amount_str AS amount, r.timestamp_utc AS ts, r.status AS status", p=self._PREFIX).data())
+
+    def test_forged_overwrite_and_injection_are_discarded(self, neo4j_mgr):
+        p = self._PREFIX
+        TransactionGraphLoader(neo4j_mgr.session).load_transaction(_make_canonical_tx(f"{p}TX1", f"{p}A", f"{p}B", "500"))
+        try:
+            before = self._transfers(neo4j_mgr)
+            forgeries = [
+                _make_canonical_tx(f"{p}TX1", f"{p}A", f"{p}B", "9999999", ts_delta_minutes=90),  # overwrite
+                _make_canonical_tx(f"{p}TX1", f"{p}A", f"{p}EVIL", "700"),                        # reuse the id
+                _make_canonical_tx(f"{p}NEW", f"{p}B", f"{p}EVIL2", "800"),                       # inject
+            ]
+            for forged in forgeries:
+                assert _agent(neo4j_mgr).analyse(forged).graph_ingestion_performed
+            assert self._transfers(neo4j_mgr) == before
+            with neo4j_mgr.session() as session:
+                names = {r["id"] for r in session.run(
+                    "MATCH (a:Account) WHERE a.account_id STARTS WITH $p RETURN a.account_id AS id", p=p).data()}
+            assert names == {f"{p}A", f"{p}B"}
+        finally:
+            _cleanup(neo4j_mgr, p)
+
+    def test_new_subject_still_anchors_layering(self, neo4j_mgr):
+        p = self._PREFIX
+        loader = TransactionGraphLoader(neo4j_mgr.session)
+        loader.load_transaction(_make_canonical_tx(f"{p}L2", f"{p}B", f"{p}C", "950", ts_delta_minutes=20))
+        loader.load_transaction(_make_canonical_tx(f"{p}L3", f"{p}C", f"{p}D", "900", ts_delta_minutes=40))
+        try:
+            subject = _make_canonical_tx(f"{p}L1", f"{p}A", f"{p}B", "1000")  # never loaded
+            result = _agent(neo4j_mgr).analyse(subject)
+            assert NetworkPatternType.LAYERING in {f.pattern_type for f in result.findings}
+            assert f"{p}A" not in str(self._transfers(neo4j_mgr))
+        finally:
+            _cleanup(neo4j_mgr, p)

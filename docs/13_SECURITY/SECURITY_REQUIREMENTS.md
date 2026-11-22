@@ -46,4 +46,9 @@ The project should clearly distinguish prototype integrations from real banking 
 
 Uploaded rows never enter the shared graph or draw on reference evidence, and
 are not sent to the LLM provider unless the analyst opts in for that file.
-See `docs/09_BACKEND/API_DESIGN.md`, including the open alert-endpoint issue.
+See `docs/09_BACKEND/API_DESIGN.md`.
+
+## Shared graph
+
+No runtime request writes to the shared Neo4j graph. Agent 3 stages the
+investigated transaction and always rolls back; only loader scripts write.

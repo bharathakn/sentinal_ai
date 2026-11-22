@@ -2,7 +2,8 @@
 Sentinel AI — dataset investigation runs.
 
     dataset → Agent 1 screens every transaction
-            → the top-N flagged go through the full five-agent graph + validator
+            → N of the flagged go through the full five-agent graph + validator
+              (uploads: the strongest; demo: the strongest of each suspected pattern)
             → each becomes a normal case, resolved by an analyst decision
 
 Progress is an append-only event log the dashboard polls. Events are emitted
@@ -31,6 +32,7 @@ from .case_schema import (
 )
 from .case_store import _now_json
 from .datasets import Dataset
+from .demo_selection import pick_varied
 from .run_events import node_view
 from .run_store import RunStore
 from .service import CaseService, NotFound, QueueFull
@@ -174,11 +176,20 @@ class RunService:
             self._emit(run_id, "screening.progress", {
                 "screened": start + len(rows), "total": total, "flagged": flagged,
                 "histogram": list(bins), "flagged_histogram": list(flagged_bins), "sample": sample})
-        best = heapq.nlargest(top_n, hits, key=lambda h: (h[0], h[1]))
+        rule = "strongest"
+        if dataset.kind == "DEMO" and top_n > 1:
+            rule = "varied"
+            by_index = {-h[1]: h[2] for h in hits}
+            ranked = [-h[1] for h in sorted(hits, key=lambda h: (h[0], h[1]), reverse=True)]
+            picked = [({**by_index[i], "lead": lead}, i)
+                      for i, lead in pick_varied(dataset.transactions(), ranked, top_n)]
+        else:
+            picked = [(h[2], -h[1]) for h in heapq.nlargest(top_n, hits, key=lambda h: (h[0], h[1]))]
         screening = {"screened": total, "flagged": flagged, "thresholds": thresholds, "histogram": bins,
-                     "flagged_histogram": flagged_bins, "selected": [h[2] for h in best]}
+                     "flagged_histogram": flagged_bins, "selection_rule": rule,
+                     "selected": [hit for hit, _ in picked]}
         self._emit(run_id, "screening.completed", screening)
-        return screening, [(h[2], dataset.rows[-h[1]]) for h in best]
+        return screening, [(hit, dataset.rows[i]) for hit, i in picked]
 
     def _investigator_for(self, run: dict, dataset: Dataset, shared: Any) -> Any:
         llm = run["settings"]["llm_reports"]

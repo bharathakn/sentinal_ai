@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+
+/** True while later cases move quickly: their animations must finish inside a shorter hold. */
+export const QuickMotion = createContext(false);
 
 export function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 }
 
 /** Counts from the last displayed value to `target`. */
-export function useCountUp(target: number, ms = 900): number {
+export function useCountUp(target: number, fullMs = 900): number {
+  const ms = useContext(QuickMotion) ? fullMs * 0.3 : fullMs;
   const [value, setValue] = useState(0);
   const current = useRef(0);
   useEffect(() => {
