@@ -54,7 +54,7 @@ export function HomePage() {
       navigate(`/runs/${run.run_id}`);
     } catch (e) {
       setError(e instanceof ApiError
-        ? e.status === 429 ? "Other investigations are still running. Try again in a moment." : e.message
+        ? e.message
         : "The service is not reachable right now.");
       setBusy(null);
     }

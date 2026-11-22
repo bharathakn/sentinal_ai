@@ -23,7 +23,7 @@ class RunStore(Protocol):
     def create(self, run: dict) -> None: ...
     def get(self, run_id: str) -> Optional[dict]: ...
     def update(self, run_id: str, fields: dict[str, Any]) -> None: ...
-    def list(self, limit: int = 20) -> list[dict]: ...
+    def list(self, limit: int = 20, owner: Optional[str] = None) -> list[dict]: ...
     def ids_with_status(self, statuses: Iterable[str]) -> list[str]: ...
     def append_event(self, run_id: str, event: dict) -> None: ...
     def events(self, run_id: str, after: int = 0, limit: int = 500) -> list[dict]: ...
@@ -64,8 +64,9 @@ class JsonRunStore:
     def _all(self) -> list[dict]:
         return [json.loads(p.read_text()) for p in self._dir.glob("RUN-*.json")]
 
-    def list(self, limit=20):
-        return sorted(self._all(), key=lambda r: r["created_at_utc"], reverse=True)[:limit]
+    def list(self, limit=20, owner=None):
+        runs = [r for r in self._all() if owner is None or r.get("created_by") == owner]
+        return sorted(runs, key=lambda r: r["created_at_utc"], reverse=True)[:limit]
 
     def ids_with_status(self, statuses):
         wanted = set(statuses)
@@ -108,8 +109,9 @@ class MongoRunStore:
     def update(self, run_id, fields):
         self._runs.update_one({"_id": run_id}, {"$set": fields})
 
-    def list(self, limit=20):
-        return list(self._runs.find({}, {"_id": 0}).sort("created_at_utc", -1).limit(limit))
+    def list(self, limit=20, owner=None):
+        flt = {} if owner is None else {"created_by": owner}
+        return list(self._runs.find(flt, {"_id": 0}).sort("created_at_utc", -1).limit(limit))
 
     def ids_with_status(self, statuses):
         return [d["_id"] for d in self._runs.find({"status": {"$in": list(statuses)}}, {"_id": 1})]

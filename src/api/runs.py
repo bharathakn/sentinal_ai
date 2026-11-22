@@ -21,7 +21,7 @@ import logging
 import threading
 from collections import Counter
 from contextlib import nullcontext
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
 from ..agents.pipeline_graph import observe
@@ -32,6 +32,7 @@ from .case_schema import (
 )
 from .case_store import _now_json
 from .datasets import Dataset
+from .limits import DailyAllowance
 from .demo_selection import pick_varied
 from .run_events import node_view
 from .run_store import RunStore
@@ -45,12 +46,16 @@ CHUNK = 500
 BINS = 24
 MAX_INVESTIGATE = 10
 MAX_ACTIVE_RUNS = 3  # each holds a dataset in memory until it finishes
+LOAD_WAIT_SECONDS = 20
 
 
 class RunService:
-    def __init__(self, cases: CaseService, store: RunStore) -> None:
+    def __init__(self, cases: CaseService, store: RunStore, allowance: Optional[DailyAllowance] = None) -> None:
         self.cases = cases
         self.store = store
+        self.allowance = allowance or DailyAllowance()
+        self._loading = threading.Lock()  # one dataset is parsed at a time
+        self._active_by: Counter = Counter()
         self._lock = threading.Lock()
         self._active = 0
         self._seq: dict[str, int] = {}
@@ -64,24 +69,44 @@ class RunService:
             logger.warning("Could not close interrupted runs: %s", type(exc).__name__)
 
     # -- reads ----------------------------------------------------------
-    def get(self, run_id: str) -> dict:
+    def get(self, run_id: str, workspace: Optional[str] = None) -> dict:
         run = self.store.get(run_id)
-        if run is None:
+        if run is None or (workspace is not None and run.get("created_by") != workspace):
             raise NotFound(f"Run {run_id} not found.")
         return run
 
-    def events(self, run_id: str, after: int = 0) -> dict:
-        status = self.get(run_id)["status"]  # read first: a terminal status implies every event is written
+    def events(self, run_id: str, after: int = 0, workspace: Optional[str] = None) -> dict:
+        status = self.get(run_id, workspace)["status"]  # read first: a terminal status implies every event is written
         events = self.store.events(run_id, after=after, limit=500)
         return {"status": status, "events": events, "next": events[-1]["seq"] if events else after,
                 "more": len(events) == 500}
 
     # -- create ---------------------------------------------------------
+    def check_capacity(self, workspace: Optional[str]) -> None:
+        """Cheap check, made before a dataset is read into memory."""
+        if self._active >= MAX_ACTIVE_RUNS or (workspace is not None and self._active_by[workspace] >= 1):
+            raise QueueFull()
+        self.allowance.check(workspace)
+
+    def launch(self, load: Callable[[], Dataset], created_by: str, workspace: Optional[str],
+               investigate_top: int, llm_reports: bool) -> dict:
+        self.check_capacity(workspace)
+        if not self._loading.acquire(timeout=LOAD_WAIT_SECONDS):
+            raise QueueFull()
+        try:
+            self.check_capacity(workspace)
+            run = self.create(load(), created_by, investigate_top, llm_reports)
+        finally:
+            self._loading.release()
+        self.allowance.spend(workspace)
+        return run
+
     def create(self, dataset: Dataset, created_by: str, investigate_top: int, llm_reports: bool) -> dict:
         with self._lock:
             if self._active >= MAX_ACTIVE_RUNS:
                 raise QueueFull()
             self._active += 1
+            self._active_by[created_by] += 1
         try:
             run_id = f"RUN-{uuid4().hex[:12].upper()}"
             run = {
@@ -95,13 +120,16 @@ class RunService:
             self._emit(run_id, "run.queued", {"dataset": run["dataset"], "settings": run["settings"]})
             self.cases.submit_job(lambda: self._execute(run, dataset, created_by))
         except Exception:
-            self._release()
+            self._release(created_by)
             raise
         return run
 
-    def _release(self) -> None:
+    def _release(self, created_by: str) -> None:
         with self._lock:
             self._active -= 1
+            self._active_by[created_by] -= 1
+            if self._active_by[created_by] <= 0:
+                del self._active_by[created_by]
 
     def _emit(self, run_id: str, kind: str, data: dict, case_id: Optional[str] = None) -> None:
         seq = self._seq[run_id] = self._seq.get(run_id, 0) + 1
@@ -145,7 +173,7 @@ class RunService:
             except Exception as store_exc:  # noqa: BLE001
                 logger.error("Run %s failure could not be stored: %s", run_id, type(store_exc).__name__)
         finally:
-            self._release()
+            self._release(created_by)
             self._seq.pop(run_id, None)
 
     def _screen(self, run: dict, dataset: Dataset, agent1: Any) -> tuple[dict, list[tuple[dict, dict]]]:
@@ -213,7 +241,7 @@ class RunService:
         tx = strip_ground_truth(dataset.transaction(row))
         case_id = new_case_id()
         self.cases.store.create(CaseRecord(
-            case_id=case_id, transaction_key=f"{run_id}:{tx.raw_record_id}", status=CaseStatus.RECEIVED,
+            case_id=case_id, owner=created_by, transaction_key=f"{run_id}:{tx.raw_record_id}", status=CaseStatus.RECEIVED,
             created_at_utc=now, updated_at_utc=now, transaction=tx.model_dump(mode="json"),
             alert=AlertInfo(source=AlertSource.DATASET_RUN, source_system=dataset.name[:64],
                             received_at_utc=now, run_id=run_id),

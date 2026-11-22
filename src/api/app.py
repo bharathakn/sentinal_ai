@@ -4,6 +4,7 @@ Sentinel AI — Phase 13: investigation API.
 Endpoints
 ---------
 GET  /health                              liveness + store / investigator readiness (public)
+POST /api/v1/auth/signup                  create an account (private workspace) and sign in
 POST /api/v1/auth/login                   sign in (sets an HttpOnly session cookie)
 POST /api/v1/auth/logout                  sign out
 GET  /api/v1/auth/me                      current analyst
@@ -23,8 +24,9 @@ GET  /api/v1/runs/{run_id}                one run
 GET  /api/v1/runs/{run_id}/events         live event log (?after=<seq>; polled)
 POST /api/v1/cases/{case_id}/decision     analyst decision (appended; revisions kept)
 
-Every /api/v1 endpoint except login needs a signed-in analyst (session
-cookie). Alert ingestion alternatively accepts ``X-API-Key`` when
+Every /api/v1 endpoint except signup and login needs a signed-in analyst
+(session cookie). A self-registered account sees only its own runs and cases;
+team accounts (scripts/manage_users.py) see all. Alert ingestion alternatively accepts ``X-API-Key`` when
 ``SENTINEL_INGEST_API_KEY`` is set (server-side alert sources).
 
 ``create_app`` has no side effects at import, so tests can build an app with a
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Optional
 
@@ -45,8 +48,9 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .auth import (
     COOKIE_NAME, AuthError, AuthService, AuthStore, LoginLocked, LoginRequest, PasswordChangeRequest, PublicUser,
-    User, auth_store_from_env,
+    ServerBusy, SignupClosed, SignupLimit, SignupRequest, User, UserExists, auth_store_from_env, signup_enabled,
 )
+from .limits import AllowanceUsed, BodyLimit
 from .case_schema import (
     PROTOTYPE_NOTICE, AlertAccepted, AlertRequest, AuditEvent, CaseList, CaseListItem, CaseRecord, CaseStatus,
     DecisionRequest,
@@ -58,6 +62,7 @@ from .runs import MAX_INVESTIGATE, RunService
 from .service import CaseService, Conflict, FeedUnavailable, NotFound, QueueFull
 
 API_VERSION = "1.0.0"
+MAX_PARALLEL_UPLOADS = 2
 DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://localhost:3000"
 
 
@@ -121,6 +126,7 @@ def create_app(
         version=API_VERSION,
         lifespan=lifespan,
     )
+    app.add_middleware(BodyLimit)
     app.add_middleware(CORSMiddleware, allow_origins=_cors_origins(), allow_credentials=False,
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-API-Key"])
 
@@ -134,7 +140,7 @@ def create_app(
 
     @app.exception_handler(QueueFull)
     async def _full(_: Request, exc: QueueFull):
-        return JSONResponse(status_code=429, content={"detail": "Investigation queue is full; retry later."},
+        return JSONResponse(status_code=429, content={"detail": "Other investigations are still running. Try again in a moment."},
                             headers={"Retry-After": "60"})
 
     @app.exception_handler(AuthError)
@@ -145,6 +151,20 @@ def create_app(
     async def _locked(_: Request, exc: LoginLocked):
         return JSONResponse(status_code=429, content={"detail": str(exc)},
                             headers={"Retry-After": str(exc.retry_after)})
+
+    @app.exception_handler(UserExists)
+    async def _taken(_: Request, exc: UserExists):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(SignupClosed)
+    async def _closed(_: Request, exc: SignupClosed):
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+    for busy, retry in ((ServerBusy, "10"), (SignupLimit, "600"), (AllowanceUsed, "3600")):
+        def handler(_: Request, exc: Exception, retry: str = retry):
+            return JSONResponse(status_code=429, content={"detail": str(exc)}, headers={"Retry-After": retry})
+
+        app.add_exception_handler(busy, handler)
 
     @app.exception_handler(DatasetError)
     async def _dataset(_: Request, exc: DatasetError):
@@ -162,6 +182,9 @@ def create_app(
     def service(request: Request) -> CaseService:
         return request.app.state.service
 
+    def run_service(request: Request) -> RunService:
+        return request.app.state.runs
+
     def auth(request: Request) -> AuthService:
         return request.app.state.auth
 
@@ -172,23 +195,37 @@ def create_app(
         return cur[0]
 
     def alert_submitter(request: Request, x_api_key: Optional[str] = Header(default=None),
-                        session_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME)) -> str:
-        """A signed-in analyst, or a server-side source holding the ingest key."""
+                        session_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME)) -> Optional[User]:
+        """The signed-in analyst, or None for a server-side source holding the ingest key."""
         if x_api_key is not None:
             if ingest_key and hmac.compare_digest(x_api_key, ingest_key):
-                return "ingest-api-key"
+                return None
             raise HTTPException(status_code=401, detail="Invalid X-API-Key.")
-        return request.app.state.auth.authenticate(session_token)[0].username
+        return request.app.state.auth.authenticate(session_token)[0]
 
-    # ------------------------------------------------------------------
-    @app.post("/api/v1/auth/login", response_model=PublicUser)
-    def login(body: LoginRequest, response: Response, svc: AuthService = Depends(auth)):
-        token, user, session = svc.login(body)
+    def set_session_cookie(response: Response, token: str, session) -> None:
         response.set_cookie(
             COOKIE_NAME, token, httponly=True, secure=secure, samesite="lax", path="/",
             max_age=int((session.absolute_expires_at_utc - session.created_at_utc).total_seconds())
-            if body.remember else None,
+            if session.remember else None,
         )
+
+    # ------------------------------------------------------------------
+    @app.post("/api/v1/auth/signup", response_model=PublicUser, status_code=201)
+    def signup(body: SignupRequest, response: Response, svc: AuthService = Depends(auth)):
+        try:
+            token, user, session = svc.signup(body)
+        except UserExists:
+            raise
+        except ValueError as exc:  # password policy
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        set_session_cookie(response, token, session)
+        return PublicUser(username=user.username, display_name=user.display_name)
+
+    @app.post("/api/v1/auth/login", response_model=PublicUser)
+    def login(body: LoginRequest, response: Response, svc: AuthService = Depends(auth)):
+        token, user, session = svc.login(body)
+        set_session_cookie(response, token, session)
         return PublicUser(username=user.username, display_name=user.display_name)
 
     @app.post("/api/v1/auth/logout", status_code=204)
@@ -227,15 +264,24 @@ def create_app(
             "investigator_error": svc.investigator_error,
             "pending_investigations": svc.pending,
             "report_writer": report_writer,
+            "signup_open": signup_enabled(),
             "prototype_notice": PROTOTYPE_NOTICE,
         }
 
     @app.post("/api/v1/alerts", response_model=AlertAccepted, status_code=202)
     def ingest_alert(alert: AlertRequest, wait: bool = Query(False, description="Block until the investigation ends."),
-                     svc: CaseService = Depends(service), submitted_by: str = Depends(alert_submitter)):
-        accepted, fut = svc.ingest(alert, submitted_by=submitted_by)
+                     svc: CaseService = Depends(service), runs: RunService = Depends(run_service),
+                     user: Optional[User] = Depends(alert_submitter)):
+        workspace = user.workspace if user else None
+        if workspace is not None:
+            if alert.transaction is not None:
+                # Free text and a self-chosen dataset label: only for team accounts and the ingest key.
+                raise HTTPException(status_code=403, detail="Use a dataset transaction id, or upload a file.")
+            runs.allowance.check(workspace)
+        accepted, fut = svc.ingest(alert, submitted_by=user.username if user else "ingest-api-key", workspace=workspace)
         if accepted.duplicate:
             return JSONResponse(status_code=200, content=accepted.model_dump(mode="json"))
+        runs.allowance.spend(workspace)
         if wait and fut is not None:
             try:
                 fut.result(timeout=wait_seconds)
@@ -250,8 +296,8 @@ def create_app(
     @app.get("/api/v1/cases", response_model=CaseList)
     def list_cases(status: Optional[CaseStatus] = None, action: Optional[str] = Query(None, max_length=32),
                    limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                   svc: CaseService = Depends(service), _: User = Depends(analyst)):
-        docs, total = svc.store.list(status=status, action=action, limit=limit, offset=offset)
+                   svc: CaseService = Depends(service), user: User = Depends(analyst)):
+        docs, total = svc.store.list(status=status, action=action, limit=limit, offset=offset, owner=user.workspace)
         items = []
         for d in docs:
             tx = d.get("transaction") or {}
@@ -265,13 +311,13 @@ def create_app(
         return CaseList(total=total, limit=limit, offset=offset, items=items)
 
     @app.get("/api/v1/cases/{case_id}", response_model=CaseRecord)
-    def get_case(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
-        return svc.get(case_id)
+    def get_case(case_id: str, svc: CaseService = Depends(service), user: User = Depends(analyst)):
+        return svc.get(case_id, user.workspace)
 
     @app.get("/api/v1/cases/{case_id}/report")
     def get_report(case_id: str, format: str = Query("json", pattern="^(json|markdown)$"),
-                   svc: CaseService = Depends(service), _: User = Depends(analyst)):
-        rec = svc.get(case_id)
+                   svc: CaseService = Depends(service), user: User = Depends(analyst)):
+        rec = svc.get(case_id, user.workspace)
         inv = rec.investigation or {}
         if not inv.get("agent5_output"):
             raise NotFound(f"Case {case_id} has no report"
@@ -288,25 +334,26 @@ def create_app(
         return PlainTextResponse(render_markdown(report, validation=validation), media_type="text/markdown")
 
     @app.get("/api/v1/cases/{case_id}/network")
-    def get_network(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
+    def get_network(case_id: str, svc: CaseService = Depends(service), user: User = Depends(analyst)):
         from .network_view import build_network_view
 
-        view = build_network_view(svc.get(case_id))
+        view = build_network_view(svc.get(case_id, user.workspace))
         if view is None:
             raise NotFound(f"Case {case_id} has no network analysis yet.")
         return view
 
     @app.get("/api/v1/cases/{case_id}/audit", response_model=list[AuditEvent])
-    def get_audit(case_id: str, svc: CaseService = Depends(service), _: User = Depends(analyst)):
-        return svc.get(case_id).audit_trail
+    def get_audit(case_id: str, svc: CaseService = Depends(service), user: User = Depends(analyst)):
+        return svc.get(case_id, user.workspace).audit_trail
 
     # -- dataset runs ---------------------------------------------------
-    def run_service(request: Request) -> RunService:
-        return request.app.state.runs
+    demo_info_lock = threading.Lock()  # first call reads the whole dataset: once, not once per visitor
+    uploads_reading = 0
 
     @app.get("/api/v1/datasets/demo")
     def get_demo_info(_: User = Depends(analyst)):
-        return demo_info()
+        with demo_info_lock:
+            return demo_info()
 
     @app.get("/api/v1/datasets/sample.csv")
     def get_sample(_: User = Depends(analyst)):
@@ -316,7 +363,7 @@ def create_app(
     @app.post("/api/v1/runs/demo", status_code=202)
     def run_demo(investigate_top: int = Query(5, ge=1, le=MAX_INVESTIGATE), llm_reports: bool = True,
                  runs: RunService = Depends(run_service), user: User = Depends(analyst)):
-        return runs.create(load_demo(), user.username, investigate_top, llm_reports)
+        return runs.launch(load_demo, user.username, user.workspace, investigate_top, llm_reports)
 
     @app.post("/api/v1/runs/upload", status_code=202)
     async def run_upload(request: Request, filename: str = Query("dataset.csv", max_length=200),
@@ -325,32 +372,41 @@ def create_app(
         content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
         if content_type not in ("text/csv", "application/json"):  # both force a CORS preflight or are same-origin
             raise HTTPException(status_code=415, detail="Send the file as text/csv or application/json.")
-        body = bytearray()
-        async for chunk in request.stream():
-            body.extend(chunk)
-            if len(body) > MAX_UPLOAD_BYTES:
-                raise HTTPException(status_code=413,
-                                    detail=f"The file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
-        dataset = await run_in_threadpool(parse_upload, bytes(body), filename)
-        return await run_in_threadpool(runs.create, dataset, user.username, investigate_top, llm_reports)
+        nonlocal uploads_reading
+        runs.check_capacity(user.workspace)  # before any of the file is held in memory
+        if uploads_reading >= MAX_PARALLEL_UPLOADS:
+            raise QueueFull()
+        uploads_reading += 1
+        try:
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413,
+                                        detail=f"The file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+            return await run_in_threadpool(runs.launch, lambda: parse_upload(bytes(body), filename),
+                                           user.username, user.workspace, investigate_top, llm_reports)
+        finally:
+            uploads_reading -= 1
 
     @app.get("/api/v1/runs")
     def list_runs(limit: int = Query(10, ge=1, le=50), runs: RunService = Depends(run_service),
-                  _: User = Depends(analyst)):
-        return {"items": runs.store.list(limit)}
+                  user: User = Depends(analyst)):
+        return {"items": runs.store.list(limit, owner=user.workspace)}
 
     @app.get("/api/v1/runs/{run_id}")
-    def get_run(run_id: str, runs: RunService = Depends(run_service), _: User = Depends(analyst)):
-        return runs.get(run_id)
+    def get_run(run_id: str, runs: RunService = Depends(run_service), user: User = Depends(analyst)):
+        return runs.get(run_id, user.workspace)
 
     @app.get("/api/v1/runs/{run_id}/events")
     def get_run_events(run_id: str, after: int = Query(0, ge=0), runs: RunService = Depends(run_service),
-                       _: User = Depends(analyst)):
-        return runs.events(run_id, after)
+                       user: User = Depends(analyst)):
+        return runs.events(run_id, after, user.workspace)
 
     @app.post("/api/v1/cases/{case_id}/decision", response_model=CaseRecord)
     def decide(case_id: str, decision: DecisionRequest, svc: CaseService = Depends(service),
                user: User = Depends(analyst)):
+        svc.get(case_id, user.workspace)  # 404 for a case outside the caller's workspace
         return svc.decide(case_id, decision, analyst_id=user.username, analyst_name=user.display_name)
 
     return app

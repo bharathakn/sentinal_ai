@@ -199,7 +199,8 @@ class CaseService:
             self._pending -= 1
 
     # -- ingestion ------------------------------------------------------
-    def ingest(self, req: AlertRequest, submitted_by: str = SYSTEM) -> tuple[AlertAccepted, Optional[Future]]:
+    def ingest(self, req: AlertRequest, submitted_by: str = SYSTEM,
+               workspace: Optional[str] = None) -> tuple[AlertAccepted, Optional[Future]]:
         if req.transaction is not None:
             tx, source = req.transaction, AlertSource.API
         else:
@@ -215,6 +216,8 @@ class CaseService:
             # The caller chooses source_dataset and id, so a supplied transaction must not be
             # able to stand in for a feed transaction's case.
             key = f"API:{key}"
+        if workspace is not None:
+            key = f"USER:{workspace}:{key}"  # never hand back a case from someone else's workspace
 
         with self._lock:  # find + create is atomic within this process
             existing = self.store.find_active_by_transaction_key(key)
@@ -227,7 +230,7 @@ class CaseService:
             alert = AlertInfo(alert_id=req.alert_id or getattr(tx.metadata, "alert_id", None), source=source,
                               source_system=req.source_system, received_at_utc=now)
             record = CaseRecord(
-                case_id=new_case_id(), transaction_key=key, status=CaseStatus.RECEIVED,
+                case_id=new_case_id(), owner=submitted_by, transaction_key=key, status=CaseStatus.RECEIVED,
                 created_at_utc=now, updated_at_utc=now, alert=alert, transaction=tx.model_dump(mode="json"),
                 audit_trail=[AuditEvent(event_type=AuditEventType.CASE_CREATED, actor=submitted_by, at_utc=now,
                                         details={"alert_id": alert.alert_id, "source": source.value,
@@ -325,9 +328,10 @@ class CaseService:
         return updated
 
     # -- reads ----------------------------------------------------------
-    def get(self, case_id: str) -> CaseRecord:
+    def get(self, case_id: str, workspace: Optional[str] = None) -> CaseRecord:
+        """``workspace`` None sees everything; otherwise another account's case does not exist."""
         rec = self.store.get(case_id)
-        if rec is None:
+        if rec is None or (workspace is not None and rec.owner != workspace):
             raise NotFound(f"Case {case_id} not found.")
         return rec
 

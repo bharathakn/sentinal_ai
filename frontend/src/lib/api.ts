@@ -51,6 +51,9 @@ export const api = {
   login: (username: string, password: string, remember: boolean) =>
     request<User>("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ username, password, remember }) },
       { authRedirect: false }),
+  signup: (username: string, display_name: string, password: string, remember: boolean) =>
+    request<User>("/api/v1/auth/signup", { method: "POST", body: JSON.stringify({ username, display_name, password, remember }) },
+      { authRedirect: false }),
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }, { authRedirect: false }),
   me: () => request<User>("/api/v1/auth/me", {}, { authRedirect: false }),
   changePassword: (current_password: string, new_password: string) =>
@@ -73,7 +76,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ transaction_id, source_system: "dashboard" }),
     }),
-  health: () => request<{ report_writer?: string }>("/health", {}, { authRedirect: false }),
+  health: () => request<{ report_writer?: string; signup_open?: boolean }>("/health", {}, { authRedirect: false }),
   demoInfo: () => request<DemoInfo>("/api/v1/datasets/demo"),
   sampleCsvUrl: "/api/v1/datasets/sample.csv",
   startDemoRun: (top: number, llm: boolean) =>

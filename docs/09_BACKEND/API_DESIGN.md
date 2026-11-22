@@ -54,6 +54,7 @@ uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1   # OpenAPI doc
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness, case-store reachability, investigator readiness, queue length (public) |
+| POST | `/api/v1/auth/signup` | Create an account: `username`, `display_name`, `password`, `remember`; sets the session cookie (`201`; `409` taken; `403` switched off) |
 | POST | `/api/v1/auth/login` | Sign in: `username`, `password`, `remember` (default true); sets the session cookie |
 | POST | `/api/v1/auth/logout` | Sign out (session deleted server-side) |
 | GET | `/api/v1/auth/me` | Signed-in analyst |
@@ -192,7 +193,7 @@ Goal: real sign-in that analysts rarely have to repeat.
 
 | Aspect | Behaviour |
 |---|---|
-| Accounts | Created by an administrator with `scripts/manage_users.py` (`create`, `reset-password`, `disable`, `enable`, `list`); no public sign-up. Usernames are lower-case and case-insensitive at sign-in. |
+| Accounts | Public sign-up (`POST /api/v1/auth/signup`) creates a **private-workspace** account and signs it in. **Team** accounts come only from `scripts/manage_users.py` (`create`, `promote`; also `reset-password`, `disable`, `enable`, `list`). Usernames are lower-case and case-insensitive at sign-in; audit-actor names are reserved. |
 | Passwords | scrypt (n=2^14, r=8, p=1, random salt); at least 10 characters. Never accepted on the command line. |
 | Session | Random 256-bit token in an `HttpOnly`, `SameSite=Lax`, `Secure` cookie (`sentinel_session`). The store keeps only its SHA-256. |
 | How long | "Keep me signed in" (default): expires after 7 days without use (`SENTINEL_SESSION_IDLE_DAYS`) and at most 30 days after sign-in (`SENTINEL_SESSION_MAX_DAYS`). Without it: 12 hours, and the cookie ends with the browser session. |
@@ -206,10 +207,26 @@ rewrite (`/api/*` → Render) rather than calling the Render domain directly.
 `SameSite=Lax` also stops other sites from making state-changing requests
 with the cookie.
 
+### Workspaces and public sign-up (2026-11-22, project owner's decision)
+
+| Account | Sees and decides | Limits |
+|---|---|---|
+| Self-registered | Only its own runs and cases; others' are `404` | 30 investigations a day (`SENTINEL_USER_RUNS_PER_DAY`), one running at a time, no raw-transaction alerts |
+| Team | Everything | Only the server-wide limits |
+
+- Server-wide: 100 sign-ups an hour (`SENTINEL_SIGNUPS_PER_HOUR`), three
+  active runs, two uploads being read at once, one parsed at a time, two
+  password hashes at once, 128 KB bodies outside uploads, bounded upload
+  parsing.
+- Switch sign-up off with `SENTINEL_ALLOW_SIGNUP=false`.
+- No email verification or self-service password reset. Counters are in
+  memory. Atlas M0 (512 MB) holds roughly 500 runs, so delete old ones or
+  switch sign-up off if it is abused.
+
 ### Prototype limitations
 
-- **No roles and no SSO.** Every account is an analyst. Accounts are
-  managed with the script.
+- **Two account types, no SSO.** Private-workspace and team accounts; both
+  act as analysts.
 - **Lockout is per process.** The failure counter lives in memory, so a
   restart clears it.
 - **Synthetic data only.** Every case and `/health` response carries

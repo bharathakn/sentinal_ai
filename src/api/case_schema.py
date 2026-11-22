@@ -168,6 +168,7 @@ class CaseSummary(BaseModel):
 class CaseRecord(BaseModel):
     schema_version: str = CASE_SCHEMA_VERSION
     case_id: str
+    owner: Optional[str] = Field(default=None, description="Account whose workspace holds the case.")
     transaction_key: str = Field(description="source_dataset:raw_record_id — de-duplicates repeated alerts.")
     status: CaseStatus
     created_at_utc: datetime

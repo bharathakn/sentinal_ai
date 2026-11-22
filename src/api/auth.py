@@ -3,8 +3,10 @@ Sentinel AI — analyst sign-in (Phase 13.1).
 
 Design goal: real authentication that analysts rarely notice.
 
-* **Accounts** are created by an administrator (``scripts/manage_users.py``);
-  there is no public sign-up. Usernames are lower-case.
+* **Accounts**: anyone can sign up (``SENTINEL_ALLOW_SIGNUP``, default on) and
+  gets a private workspace: only their own runs and cases. Team accounts, which
+  see every case, come only from ``scripts/manage_users.py`` (create / promote).
+  Usernames are lower-case.
 * **Passwords** are hashed with scrypt (stdlib; n=2**14, r=8, p=1, 16-byte
   salt). Minimum length 10.
 * **Sessions** are server-side. The browser holds a random 256-bit token in an
@@ -40,6 +42,12 @@ COOKIE_NAME = "sentinel_session"
 MIN_PASSWORD_LENGTH = 10
 _SCRYPT = dict(n=2 ** 14, r=8, p=1, dklen=32)
 USERNAME_PATTERN = r"^[a-z0-9][a-z0-9._@\-]{1,63}$"
+# Names that appear as actors in audit trails, or would pass for staff.
+RESERVED_USERNAMES = frozenset({"system", "ingest-api-key", "demo-seed", "admin", "administrator", "root",
+                                "sentinel", "support"})
+# scrypt takes 16 MB per call: unbounded parallel sign-ins would exhaust a 512 MB server.
+_HASH_SLOTS = threading.BoundedSemaphore(2)
+_HASH_WAIT_SECONDS = 20
 
 
 def utcnow() -> datetime:
@@ -50,9 +58,22 @@ def utcnow() -> datetime:
 # Passwords and tokens
 # ---------------------------------------------------------------------------
 
+class ServerBusy(Exception):
+    """Too much is happening at once (message is safe to show)."""
+
+
+def _scrypt(password: str, salt: bytes) -> bytes:
+    if not _HASH_SLOTS.acquire(timeout=_HASH_WAIT_SECONDS):
+        raise ServerBusy("Many people are signing in right now. Try again in a moment.")
+    try:
+        return hashlib.scrypt(password.encode(), salt=salt, **_SCRYPT)
+    finally:
+        _HASH_SLOTS.release()
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    dk = hashlib.scrypt(password.encode(), salt=salt, **_SCRYPT)
+    dk = _scrypt(password, salt)
     return "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(dk).decode()
 
 
@@ -61,7 +82,7 @@ def verify_password(password: str, stored: str) -> bool:
         scheme, salt_b64, dk_b64 = stored.split("$")
         if scheme != "scrypt":
             return False
-        dk = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt_b64), **_SCRYPT)
+        dk = _scrypt(password, base64.b64decode(salt_b64))
         return hmac.compare_digest(dk, base64.b64decode(dk_b64))
     except (ValueError, TypeError):
         return False
@@ -97,6 +118,13 @@ class User(BaseModel):
     created_at_utc: datetime = Field(default_factory=utcnow)
     password_changed_at_utc: datetime = Field(default_factory=utcnow)
     last_login_at_utc: Optional[datetime] = None
+    #: Set only by public sign-up: limits the account to its own workspace.
+    self_registered: bool = False
+
+    @property
+    def workspace(self) -> Optional[str]:
+        """Whose data this user may see: their own, or None for a team account (everything)."""
+        return self.username if self.self_registered else None
 
 
 class Session(BaseModel):
@@ -127,6 +155,28 @@ class LoginRequest(BaseModel):
         return v.strip().lower()
 
 
+class SignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # an account type can never be requested
+
+    username: str = Field(min_length=3, max_length=64, pattern=USERNAME_PATTERN)
+    display_name: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=256)
+    remember: bool = True
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def _lower(cls, v: Any) -> Any:
+        return v.strip().lower() if isinstance(v, str) else v
+
+    @field_validator("display_name")
+    @classmethod
+    def _printable(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v or not v.isprintable():
+            raise ValueError("Enter your name.")
+        return v
+
+
 class PasswordChangeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -137,6 +187,10 @@ class PasswordChangeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Stores
 # ---------------------------------------------------------------------------
+
+class UserExists(ValueError):
+    """The username is taken."""
+
 
 class AuthStore(Protocol):
     def get_user(self, username: str) -> Optional[User]: ...
@@ -178,7 +232,7 @@ class JsonAuthStore:
         with self._lock:
             data = self._load()
             if user.username in data["users"]:
-                raise ValueError(f"User {user.username} already exists.")
+                raise UserExists(f"User {user.username} already exists.")
             data["users"][user.username] = user.model_dump(mode="json")
             self._save(data)
 
@@ -271,7 +325,7 @@ class MongoAuthStore:
         try:
             self._users.insert_one({"_id": user.username, **self._native(user)})
         except DuplicateKeyError as exc:
-            raise ValueError(f"User {user.username} already exists.") from exc
+            raise UserExists(f"User {user.username} already exists.") from exc
 
     def update_user(self, username, fields):
         if self._users.update_one({"_id": username}, {"$set": fields}).matched_count == 0:
@@ -304,6 +358,10 @@ class MongoAuthStore:
         self._client.close()
 
 
+def signup_enabled() -> bool:
+    return os.environ.get("SENTINEL_ALLOW_SIGNUP", "true").strip().lower() not in ("false", "0", "no")
+
+
 def auth_store_from_env() -> AuthStore:
     name = os.environ.get("SENTINEL_CASE_STORE", "json").strip().lower()
     return MongoAuthStore() if name == "mongodb" else JsonAuthStore()
@@ -321,6 +379,14 @@ class LoginLocked(Exception):
     def __init__(self, retry_after: int) -> None:
         super().__init__("Too many failed sign-in attempts. Try again later.")
         self.retry_after = retry_after
+
+
+class SignupClosed(Exception):
+    """Public sign-up is switched off."""
+
+
+class SignupLimit(Exception):
+    """Too many new accounts this hour."""
 
 
 class _Throttle:
@@ -358,6 +424,32 @@ class AuthService:
                                  else float(os.environ.get("SENTINEL_SESSION_MAX_DAYS", "30")))
         self.short_idle = timedelta(hours=short_idle_hours)
         self.throttle = _Throttle()
+        self.signup_open = signup_enabled()
+        self.signups_per_hour = int(os.environ.get("SENTINEL_SIGNUPS_PER_HOUR", "100"))
+        self._signups: list[float] = []
+        self._signup_lock = threading.Lock()
+
+    # -- public sign-up -------------------------------------------------
+    def signup(self, req: SignupRequest) -> tuple[str, User, Session]:
+        if not self.signup_open:
+            raise SignupClosed("Sign-up is switched off. Ask the team for an account.")
+        check_password_policy(req.password)
+        if req.username in RESERVED_USERNAMES or self.store.get_user(req.username) is not None:
+            raise UserExists("That username is taken.")
+        with self._signup_lock:
+            now = time.monotonic()
+            self._signups = [t for t in self._signups if now - t < 3600]
+            if len(self._signups) >= self.signups_per_hour:
+                raise SignupLimit("Too many new accounts were created this hour. Try again later.")
+            self._signups.append(now)
+        user = User(username=req.username, display_name=req.display_name,
+                    password_hash=hash_password(req.password), self_registered=True)
+        try:
+            self.store.create_user(user)  # atomic: the store refuses an existing username
+        except UserExists:
+            raise UserExists("That username is taken.") from None
+        token, session = self._open_session(user, req.remember)
+        return token, user, session
 
     # -- user administration (CLI) --------------------------------------
     def create_user(self, username: str, display_name: str, password: str) -> User:
@@ -373,6 +465,10 @@ class AuthService:
                                           "password_changed_at_utc": utcnow()})
         self.store.delete_user_sessions(username, except_hash=keep_session)
 
+    def promote(self, username: str) -> None:
+        """Make a self-registered account a team account (sees every case)."""
+        self.store.update_user(username, {"self_registered": False})
+
     def set_active(self, username: str, active: bool) -> None:
         self.store.update_user(username, {"active": active})
         if not active:
@@ -387,16 +483,20 @@ class AuthService:
             self.throttle.fail(req.username)
             raise AuthError("Incorrect username or password.")
         self.throttle.reset(req.username)
+        token, session = self._open_session(user, req.remember)
+        return token, user, session
+
+    def _open_session(self, user: User, remember: bool) -> tuple[str, Session]:
         now = utcnow()
         token = new_token()
-        absolute = now + (self.max_age if req.remember else self.short_idle)
+        absolute = now + (self.max_age if remember else self.short_idle)
         session = Session(token_hash=token_hash(token), username=user.username, created_at_utc=now,
-                          last_seen_at_utc=now, expires_at_utc=min(now + (self.idle if req.remember
+                          last_seen_at_utc=now, expires_at_utc=min(now + (self.idle if remember
                                                                          else self.short_idle), absolute),
-                          absolute_expires_at_utc=absolute, remember=req.remember)
+                          absolute_expires_at_utc=absolute, remember=remember)
         self.store.create_session(session)
         self.store.update_user(user.username, {"last_login_at_utc": now})
-        return token, user, session
+        return token, session
 
     def authenticate(self, token: Optional[str]) -> tuple[User, Session]:
         if not token:
@@ -429,4 +529,5 @@ class AuthService:
 
 __all__ = ["AuthService", "AuthStore", "AuthError", "LoginLocked", "JsonAuthStore", "MongoAuthStore",
            "auth_store_from_env", "User", "Session", "PublicUser", "LoginRequest", "PasswordChangeRequest",
+           "SignupRequest", "SignupClosed", "SignupLimit", "ServerBusy", "UserExists", "signup_enabled",
            "COOKIE_NAME", "hash_password", "verify_password"]

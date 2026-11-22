@@ -108,7 +108,9 @@ of several MB and behaviour while Render is waking up.
    deployment URLs require a Vercel login.
 7. **CORS.** Render → Environment: set `SENTINEL_CORS_ORIGINS` to the Vercel
    origin (no trailing slash) → Save and deploy.
-8. **Account**, from a developer machine:
+8. **Accounts.** Visitors use "Create account" on the site (private
+   workspace). For a team account that sees every case, from a developer
+   machine, either `... manage_users.py promote <user>` or:
    `SENTINEL_CASE_STORE=mongodb .venv/bin/python scripts/manage_users.py create <user> --name "<Name>"`.
    No seeding is needed: "Load demo dataset" creates the cases.
 9. **Smoke test** on the Vercel URL: sign in, demo run, sample-file upload,

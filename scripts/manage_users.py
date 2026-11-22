@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Manage analyst accounts (no public sign-up).
+"""Manage team accounts (these see every case).
+
+Public sign-up on the website creates private-workspace accounts; `promote`
+turns one of those into a team account.
 
 Uses the same store as the API: SENTINEL_CASE_STORE=json (var/auth.json) or
 mongodb (MONGODB_URI / MONGODB_DATABASE). Reads .env when present. To manage
@@ -8,6 +11,7 @@ the hosted accounts, run it locally with the Atlas settings.
     python scripts/manage_users.py create alice --name "Alice Rao"   # prompts for the password
     python scripts/manage_users.py reset-password alice              # signs alice out everywhere
     python scripts/manage_users.py disable alice | enable alice
+    python scripts/manage_users.py promote alice                     # self-registered → team account
     python scripts/manage_users.py list
 
 Passwords are prompted (not echoed) or read from stdin with --password-stdin;
@@ -51,7 +55,7 @@ def main() -> None:
     r.add_argument("username")
     for p in (c, r):
         p.add_argument("--password-stdin", action="store_true")
-    for name in ("disable", "enable"):
+    for name in ("disable", "enable", "promote"):
         sub.add_parser(name).add_argument("username")
     sub.add_parser("list")
     args = ap.parse_args()
@@ -69,10 +73,13 @@ def main() -> None:
         elif args.cmd in ("disable", "enable"):
             svc.set_active(args.username.lower(), args.cmd == "enable")
             print(f"{args.username.lower()} {args.cmd}d.")
+        elif args.cmd == "promote":
+            svc.promote(args.username.lower())
+            print(f"{args.username.lower()} is now a team account and can see every case.")
         else:
             for u in svc.store.list_users():
                 last = u.last_login_at_utc.isoformat() if u.last_login_at_utc else "never"
-                print(f"{u.username:24} {u.display_name:28} {'active' if u.active else 'DISABLED':9} last login {last}")
+                print(f"{u.username:24} {u.display_name:28} {'self-signup' if u.self_registered else 'team':11} {'active' if u.active else 'DISABLED':9} last login {last}")
     except (ValueError, KeyError) as exc:
         raise SystemExit(f"Error: {exc}")
 

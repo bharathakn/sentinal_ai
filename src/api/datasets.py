@@ -29,6 +29,7 @@ DEMO_NAME = "India synthetic transactions"
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 MAX_UPLOAD_ROWS = 10_000
 MAX_REPORTED_ERRORS = 8
+MAX_CELLS_PER_ROW = 60  # the demo layout has 32 columns
 
 # The account-history columns are required, not optional: Agent 1's model treats
 # their absence as suspicious. Without amount_ratio_vs_30d_avg alone it flags
@@ -159,8 +160,14 @@ def parse_upload(content: bytes, filename: Optional[str]) -> Dataset:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise DatasetError("The file must be UTF-8 CSV or JSON. Save Excel files as CSV first.") from None
+    # Bound what parsing can allocate: 8 MB of "{},{},…" becomes about 200 MB of objects.
+    is_json = text.lstrip()[:1] in ("[", "{")
+    max_objects = (MAX_UPLOAD_ROWS + 1) * 3
+    if (text.count(",") > (MAX_UPLOAD_ROWS + 1) * MAX_CELLS_PER_ROW
+            or (is_json and (text.count("{") > max_objects or text.count("[") > max_objects))):
+        raise DatasetError(f"The file has more than {MAX_UPLOAD_ROWS:,} transactions or far too many columns.")
     try:
-        if text.lstrip()[:1] in ("[", "{"):
+        if is_json:
             data = json.loads(text)
             records = data.get("transactions") if isinstance(data, dict) else data
             if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):

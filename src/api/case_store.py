@@ -46,7 +46,7 @@ class CaseStore(Protocol):
                require_status: Optional[Iterable[CaseStatus]] = None,
                require_fields: Optional[dict[str, Any]] = None) -> Optional[CaseRecord]: ...
     def list(self, status: Optional[CaseStatus] = None, action: Optional[str] = None,
-             limit: int = 50, offset: int = 0) -> tuple[list[dict], int]: ...
+             limit: int = 50, offset: int = 0, owner: Optional[str] = None) -> tuple[list[dict], int]: ...
     def case_ids_with_status(self, statuses: Iterable[CaseStatus]) -> list[str]: ...
 
 
@@ -161,8 +161,10 @@ class JsonCaseStore:
             self._write(doc)
             return CaseRecord.model_validate(doc)
 
-    def list(self, status=None, action=None, limit=50, offset=0):
+    def list(self, status=None, action=None, limit=50, offset=0, owner=None):
         docs = self._all()
+        if owner is not None:
+            docs = [d for d in docs if d.get("owner") == owner]
         if status is not None:
             docs = [d for d in docs if d.get("status") == status.value]
         if action is not None:
@@ -205,6 +207,7 @@ class MongoCaseStore:
                 return
             self._col.create_index("transaction_key")
             self._col.create_index("status")
+            self._col.create_index("owner")
             self._col.create_index([("summary.priority_rank", -1), ("summary.risk_score", -1), ("created_at_utc", 1)])
             self._indexed = True
 
@@ -253,9 +256,11 @@ class MongoCaseStore:
             upd["$push"] = push
         return self._record(self._col.find_one_and_update(flt, upd, return_document=ReturnDocument.AFTER))
 
-    def list(self, status=None, action=None, limit=50, offset=0):
+    def list(self, status=None, action=None, limit=50, offset=0, owner=None):
         self._ensure_indexes()
         flt: dict[str, Any] = {}
+        if owner is not None:
+            flt["owner"] = owner
         if status is not None:
             flt["status"] = status.value
         if action is not None:

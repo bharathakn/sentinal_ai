@@ -103,7 +103,8 @@ Deployment target (Vercel + Render) recorded in
 - All case endpoints require sign-in. Decisions and ingestions are
   attributed to the signed-in user. Ingestion alternatively accepts the
   server-side ingest key.
-- Accounts: `scripts/manage_users.py` (no public sign-up).
+- Accounts: public sign-up into private workspaces (added 2026-11-22); team
+  accounts via `scripts/manage_users.py`.
 - Tests: `tests/test_auth.py` (+ MongoDB auth store live on Atlas).
 
 ## Phase 13 summary
@@ -188,8 +189,8 @@ Deployment target (Vercel + Render) recorded in
 
 - Supply the current RBI direction and PMLA / FIU-IND PDFs to restore India
   mappings.
-- Create the real analyst accounts on Atlas before the demo
-  (`scripts/manage_users.py`, see `docs/14_OPERATIONS/DEPLOYMENT.md`).
+- Promote the team's own accounts after they sign up
+  (`scripts/manage_users.py promote`, see `docs/14_OPERATIONS/DEPLOYMENT.md`).
 
 ## Known limitations
 

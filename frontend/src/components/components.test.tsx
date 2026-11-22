@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginPage } from "../pages/LoginPage";
 import type { CaseRecord, Report } from "../lib/types";
 import { DecisionPanel } from "./DecisionPanel";
@@ -17,6 +17,7 @@ function stubFetch(status: number, body: unknown, headers: Record<string, string
 }
 
 describe("LoginPage", () => {
+  beforeEach(() => localStorage.setItem("sentinel.hasAccount", "1")); // a returning visitor
   function fill(user = "alice", pw = "secret-password") {
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: user } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: pw } });
@@ -47,6 +48,53 @@ describe("LoginPage", () => {
     render(<LoginPage onSignedIn={vi.fn()} />);
     fill();
     expect((await screen.findByRole("alert")).textContent).toContain("10 minutes");
+  });
+});
+
+describe("Create account", () => {
+  beforeEach(() => localStorage.clear()); // a first visit
+
+  function fillSignup(confirm = "secret-password") {
+    for (const [label, value] of [["Your name", "Alice Rao"], ["Username", "Alice"], ["Password", "secret-password"], ["Confirm password", confirm]]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Create account and continue" }));
+  }
+
+  it("is what a first-time visitor sees, and signs them straight in", async () => {
+    const f = stubFetch(201, { username: "alice", display_name: "Alice Rao" });
+    const onSignedIn = vi.fn();
+    render(<LoginPage onSignedIn={onSignedIn} />);
+    expect(screen.getByRole("heading", { name: "Create your account" })).toBeTruthy();
+    fillSignup();
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalled());
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/signup");
+    expect(JSON.parse(String(init.body))).toEqual({ username: "alice", display_name: "Alice Rao", password: "secret-password", remember: true });
+    expect(localStorage.getItem("sentinel.hasAccount")).toBe("1"); // next visit opens on "Sign in"
+  });
+
+  it("checks the password confirmation before sending anything", () => {
+    const f = stubFetch(201, {});
+    render(<LoginPage onSignedIn={vi.fn()} />);
+    fillSignup("different-password");
+    expect(screen.getByRole("alert").textContent).toContain("do not match");
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("explains a taken username", async () => {
+    stubFetch(409, { detail: "That username is taken." });
+    render(<LoginPage onSignedIn={vi.fn()} />);
+    fillSignup();
+    expect((await screen.findByRole("alert")).textContent).toContain("taken");
+  });
+
+  it("has sign-in one click away, and hides sign-up when it is closed", () => {
+    const { rerender } = render(<LoginPage onSignedIn={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Sign in" }));
+    expect(screen.getByRole("heading", { name: "Welcome back" })).toBeTruthy();
+    rerender(<LoginPage onSignedIn={vi.fn()} signupOpen={false} />);
+    expect(screen.queryByRole("tab")).toBeNull();
   });
 });
 

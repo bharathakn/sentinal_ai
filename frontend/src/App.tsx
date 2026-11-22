@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Logo } from "./components/Icons";
 import { Spinner } from "./components/ui";
+import { rememberAccount } from "./lib/account";
 import { ApiError, api, setUnauthorizedHandler } from "./lib/api";
 import { navigate, useRoute } from "./lib/router";
 import type { User } from "./lib/types";
@@ -15,15 +16,22 @@ type AuthState = { status: "checking" } | { status: "signed-out"; reason?: strin
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: "checking" });
   const [writer, setWriter] = useState<string | null>(null);
+  const [signupOpen, setSignupOpen] = useState(true);
   const route = useRoute();
 
   useEffect(() => {
     // A returning analyst with a valid session goes straight in.
     setUnauthorizedHandler(() => setAuth({ status: "signed-out", reason: "Your session has ended. Please sign in again." }));
     api.me()
-      .then((user) => setAuth({ status: "signed-in", user }))
+      .then((user) => {
+        rememberAccount();
+        setAuth({ status: "signed-in", user });
+      })
       .catch((e) => setAuth({ status: "signed-out", reason: e instanceof ApiError && e.status !== 401 ? "The service is waking up or unreachable; try again shortly." : undefined }));
-    api.health().then((h) => setWriter(h.report_writer ?? null)).catch(() => setWriter(null));
+    api.health().then((h) => {
+      setWriter(h.report_writer ?? null);
+      setSignupOpen(h.signup_open !== false);
+    }).catch(() => setWriter(null));
   }, []);
 
   if (auth.status === "checking") return <div className="center"><Spinner label="Connecting…" /></div>;
@@ -31,13 +39,16 @@ export function App() {
     return (
       <>
         {auth.reason && <div className="toast">{auth.reason}</div>}
-        <LoginPage onSignedIn={(user) => setAuth({ status: "signed-in", user })} />
+        <LoginPage signupOpen={signupOpen} onSignedIn={(user) => setAuth({ status: "signed-in", user })} />
       </>
     );
   }
 
   async function signOut() {
-    try { await api.logout(); } finally { setAuth({ status: "signed-out" }); }
+    try { await api.logout(); } finally {
+      navigate("/"); // the next person to sign in here must not land on this person's case
+      setAuth({ status: "signed-out" });
+    }
   }
 
   const inCases = route.name === "queue" || route.name === "case";
@@ -51,7 +62,7 @@ export function App() {
             <a href="#/cases" className={inCases ? "nav-on" : ""}>Cases</a>
           </nav>
           {writer && <span className="pill pill-live"><i />{writer === "groq" ? "AI: Groq" : "AI: offline"}</span>}
-          <button className="btn btn-ghost btn-xs" onClick={signOut} title={`Signed in as ${auth.user.display_name}`}>Sign out</button>
+          <button className="btn btn-ghost btn-xs" onClick={signOut} title={`Signed in as ${auth.user.display_name} (${auth.user.username})`}>Sign out</button>
         </div>
       </header>
       <main>

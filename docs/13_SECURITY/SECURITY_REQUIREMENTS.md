@@ -24,7 +24,10 @@ Analyst actions must be recorded.
 
 ## Authentication (implemented Phase 13.1)
 
-Analysts sign in with administrator-created accounts. The API takes the
+Anyone can sign up, into a private workspace that shows only their own runs
+and cases. Team accounts, which see every case, are granted only with
+`scripts/manage_users.py`. Every route that takes a case or run id checks the
+owner (`tests/test_signup.py` tests each one). The API takes the
 analyst's identity from the server-side session, never from the request
 body. Details: `docs/09_BACKEND/API_DESIGN.md` → Authentication.
 
